@@ -209,7 +209,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .ob.D{box-shadow:inset 3px 0 0 var(--dem)} .ob.R{box-shadow:inset 3px 0 0 var(--rep)} .ob.I{box-shadow:inset 3px 0 0 var(--ind)}
 .ob.hit{color:#3ddc84} .ob.miss{color:#ff8c84;text-decoration:line-through}
 .res{font-family:var(--f-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.wt{font-family:var(--f-num);font-size:11px;color:var(--muted)}
+.wt{display:block;font-family:var(--f-num);font-size:11px;color:var(--muted);margin-top:2px}
 @media (max-width:640px){ .prow{grid-template-columns:minmax(0,1fr) auto} .others{grid-column:1/-1;justify-content:flex-start;max-width:none} }
 @media (max-width:980px){ .main{grid-template-columns:minmax(0,1fr)} .rail{max-height:none} }
 @media (max-width:560px){
@@ -315,14 +315,15 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
       <details class="rules" id="scoreNote">
         <summary>ⓘ How scoring works</summary>
         <table>
-          <tr><td>Correct pick, Solid or Likely race</td><td>1 pt</td></tr>
-          <tr><td>Correct pick, Lean race</td><td>2 pts</td></tr>
-          <tr><td>Correct pick, Toss-up</td><td>3 pts</td></tr>
-          <tr><td>Upset bonus: you called a race the forecasters' underdog won</td><td>+3 pts</td></tr>
-          <tr><td>Closest guess at total Dem House seats</td><td>+5 pts</td></tr>
+          <tr><td>Picked the favorite and got it right</td><td>1 pt</td></tr>
+          <tr><td>Called a toss-up right</td><td>2 pts</td></tr>
+          <tr><td>Called an upset right: Lean race</td><td>3 pts</td></tr>
+          <tr><td>Called an upset right: Likely race</td><td>5 pts</td></tr>
+          <tr><td>Called an upset right: Solid race</td><td>7 pts</td></tr>
           <tr><td>Closest guess at total Dem Senate seats</td><td>+3 pts</td></tr>
+          <tr><td>Closest guess at total Dem House seats</td><td>+4 pts</td></tr>
         </table>
-        <p>Ratings are the final pre-election forecasts shown on each race. Seat-guess bonuses are awarded once every race in that chamber is called; if two guesses are equally close, both get the points. Ties on the leaderboard go to whoever called more toss-ups correctly. Example: picking a Lean R race for the Democrat and being right earns 2 + 3 = 5 points.</p>
+        <p>Ratings are the final pre-election forecasts shown on each race. Seat-guess bonuses are awarded once every race in that chamber is called; if two guesses are equally close, both get the points. Ties on the leaderboard go to whoever called more toss-ups correctly. The favorite and underdog come from the final pre-election rating on each race. Wrong picks cost nothing. An upset means you picked the underdog and they won; the less likely the upset, the more it pays. Example: Michigan is Lean D. Picking the Democrat and being right earns 1 point; picking the Republican and being right earns 3.</p>
       </details>
     </section>
     <section class="card" aria-label="Your picks">
@@ -331,7 +332,7 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
       <div class="mebar">
         <label class="nm" for="pkName">Your name<input id="pkName" maxlength="24" placeholder="Name"></label>
         <label class="tb" for="tbSen">Dem Senate seats (+3)<input id="tbSen" inputmode="numeric" placeholder="e.g. 51"></label>
-        <label class="tb" for="tbHouse">Dem House seats (+5)<input id="tbHouse" inputmode="numeric" placeholder="e.g. 225"></label>
+        <label class="tb" for="tbHouse">Dem House seats (+4)<input id="tbHouse" inputmode="numeric" placeholder="e.g. 225"></label>
       </div>
       <div class="sh-foot">
         <button class="tbtn" id="fillFav">⚡ Auto-pick all non-toss-ups</button>
@@ -709,7 +710,8 @@ $("foot").textContent="Ratings are pre-election forecasts: House from Cook Polit
 
 /* ---------- predictions ---------- */
 let mode="board", players={}, meId="p1", pickStore="local", picksCol=null, myDraft=null, wTimer=null, writeChain=Promise.resolve();
-const WEIGHT={T:3,LD:2,LR:2}, UPSET=3, SEAT_BONUS={sen:3,house:5};
+const WEIGHT={T:2}, SEAT_BONUS={sen:3,house:4};
+const upsetPts=it=> it.rating==="LD"||it.rating==="LR"?3: it.rating==="KD"||it.rating==="KR"?5: favOf(it)?7:0;
 const favOf=it=> it.rating==="LD"||it.rating==="KD"?"D": it.rating==="LR"||it.rating==="KR"?"R": !it.rating&&it.holder!=="N"?it.holder:null;
 const CH_LABEL={sen:"Senate",house:"House",gov:"Gov"};
 function initLocalPlayers(){
@@ -729,7 +731,8 @@ function scoreOf(p){
   let pts=0,hit=0,dec=0,made=0,toss=0,upsets=0;
   for(const k in (p.picks||{})){ if(!inGame(k))continue; const it=raceOf(k); if(!it)continue; made++;
     const r=resultFor(k); if(!r)continue; dec++;
-    if(p.picks[k]===r){ hit++; pts+=WEIGHT[it.rating]||1; if(it.rating==="T") toss++; const f=favOf(it); if(f&&r!==f){ pts+=UPSET; upsets++; } } }
+    if(p.picks[k]===r){ hit++; if(it.rating==="T") toss++; const f=favOf(it);
+      if(f&&r!==f){ pts+=upsetPts(it); upsets++; } else pts+=WEIGHT[it.rating]||1; } }
   return {pts,hit,dec,made,toss,upsets};
 }
 function actual(ch){ /* Dem seats so far, for the tiebreaker once everything is called */
@@ -806,7 +809,8 @@ function renderPicks(){
     const where= race==="house"?`${NAMES[it.st]} · ${it.note}`:(it.note||"");
     row.innerHTML=`<div class="info"><b></b><span class="wt"></span><small></small></div><div class="mypick"></div><div class="others"></div>`;
     row.querySelector("b").textContent= race==="house"?it.id.replace("-AL",""):NAMES[it.st];
-    row.querySelector(".wt").textContent=`${WEIGHT[it.rating]||1} pt${(WEIGHT[it.rating]||1)>1?"s":""}`;
+    { const f=favOf(it), base=WEIGHT[it.rating]||1;
+      row.querySelector(".wt").textContent= f?`${f} favored: 1 pt · ${f==="D"?"R":"D"} upset: ${upsetPts(it)} pts`:`Toss-up: 2 pts either way`; }
     row.querySelector("small").textContent=[it.rating?RTG_LABEL[it.rating]:"Solid "+it.holder, where, r?`Result: ${r==="D"?"Dem":r==="R"?"GOP":"Ind"} win`:null].filter(Boolean).join(" · ");
     const mpEl=row.querySelector(".mypick");
     const opts=race==="sen"&&it.id==="NE"?["D","I","R"]:["D","R"];
