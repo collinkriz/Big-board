@@ -305,9 +305,10 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
         <label class="tb" for="tbHouse">Dem House seats<input id="tbHouse" inputmode="numeric" placeholder="e.g. 225"></label>
       </div>
       <div class="sh-foot">
-        <button class="tbtn" id="fillFav">Fill blanks with favorites</button>
-        <button class="tbtn lockb" id="lockBtn">🔒 Lock my picks</button>
+        <button class="tbtn" id="fillFav">⚡ Auto-pick all non-toss-ups</button>
+        <button class="tbtn lockb" id="lockBtn">✅ Submit my picks</button>
       </div>
+      <p class="pkstatus" id="pkProgress"></p>
       <p class="pkstatus" id="pkStatus"></p>
       <div class="plist" id="plist"></div>
     </section>
@@ -574,7 +575,7 @@ function renderRail(){
 }
 function renderCounts(){
   const all=items(); const cur=filter;
-  document.querySelectorAll(".fchip").forEach(b=>{ filter=b.dataset.f; b.querySelector(".n").textContent=all.filter(passes).length; b.setAttribute("aria-pressed",String(b.dataset.f===cur)); });
+  document.querySelectorAll("#filters .fchip").forEach(b=>{ filter=b.dataset.f; b.querySelector(".n").textContent=all.filter(passes).length; b.setAttribute("aria-pressed",String(b.dataset.f===cur)); });
   filter=cur;
 }
 
@@ -659,7 +660,7 @@ zoomOut.onclick=()=>{ zoomFull(); if(stFilter){ stFilter=null; paint(); } };
 /* ---------- controls ---------- */
 function setRace(r){ race=r; stFilter=null; $("dview").hidden=true; ["sen","house","gov"].forEach(x=>$("tab-"+x).setAttribute("aria-pressed",String(x===r))); if(!sheet.hidden)closeSheet(); zoomFull(); paint(); }
 ["sen","house","gov"].forEach(x=>$("tab-"+x).onclick=()=>setRace(x));
-document.querySelectorAll(".fchip").forEach(b=>b.onclick=()=>{ filter=b.dataset.f; stFilter=null; paint(); });
+document.querySelectorAll("#filters .fchip").forEach(b=>b.onclick=()=>{ filter=b.dataset.f; stFilter=null; paint(); });
 rtgBtn.onclick=()=>{ showRtg=!showRtg; rtgBtn.setAttribute("aria-pressed",String(showRtg)); paint(); };
 let armed=null;
 resetBtn.onclick=()=>{
@@ -723,9 +724,9 @@ function renderPicks(){
   rows.forEach((r,i)=>{
     const d=document.createElement("div"); d.className="lbrow"+(i===0&&r.s.pts>0?" lead":"");
     d.innerHTML=`<span class="rk">${i+1}</span><span class="who"><span class="nmx"></span><small></small></span><span class="pts">${r.s.pts}<small>points</small></span>`;
-    d.querySelector(".nmx").textContent=(r.pl.name||"Unnamed")+(r.id===meId?" (you)":"")+(r.pl.locked?" 🔒":"");
+    d.querySelector(".nmx").textContent=(r.pl.name||"Unnamed")+(r.id===meId?" (you)":"")+(r.pl.locked?" ✅":"");
     const tb=r.pl.tb||{};
-    d.querySelector("small").textContent=`${r.s.hit} of ${r.s.dec} called races right · ${r.s.made} picks made`+((tb.sen||tb.house)?` · tiebreak ${tb.sen||"–"} Sen / ${tb.house||"–"} House`:"");
+    d.querySelector("small").textContent=(r.pl.locked?"Submitted":"Still picking")+` · ${r.s.hit} of ${r.s.dec} called races right · ${r.s.made} picks made`+((tb.sen||tb.house)?` · tiebreak ${tb.sen||"–"} Sen / ${tb.house||"–"} House`:"");
     lb.appendChild(d);
   });
   /* my controls */
@@ -737,7 +738,10 @@ function renderPicks(){
   if(document.activeElement!==ts) ts.value=(p.tb&&p.tb.sen)||""; if(document.activeElement!==th) th.value=(p.tb&&p.tb.house)||"";
   [nm,ts,th].forEach(x=>x.disabled=!!p.locked&&x!==nm);
   const lk=$("lockBtn"); lk.classList.toggle("locked",!!p.locked); lk.disabled=!!p.locked;
-  if(!lockArmed) lk.textContent=p.locked?"🔒 Picks locked":"🔒 Lock my picks";
+  if(!lockArmed) lk.textContent=p.locked?"✅ Picks submitted":"✅ Submit my picks";
+  const prog=progress(p);
+  $("pkProgress").textContent= p.locked?`Submitted with ${prog.made} of ${prog.total} races picked. Good luck.`
+    :`${prog.made} of ${prog.total} races picked · ${prog.tossLeft} toss-up${prog.tossLeft===1?"":"s"} still blank`;
   $("fillFav").disabled=!!p.locked;
   /* race list for the current chamber */
   const list=$("plist"); list.textContent="";
@@ -772,13 +776,22 @@ $("fillFav").onclick=()=>{
   for(const ch in RACES) for(const id in RACES[ch].items){ const it=RACES[ch].items[id], k=ch+"-"+id; if(p.picks[k])continue;
     const fav= it.rating==="LD"||it.rating==="KD"?"D": it.rating==="LR"||it.rating==="KR"?"R": !it.rating&&it.holder!=="N"?it.holder:null;
     if(fav){ p.picks[k]=fav; n++; } }
-  $("pkStatus").textContent=`Filled ${n} races with the forecast favorite. Toss-ups are still yours to call.`; commitMe();
+  $("pkStatus").textContent= n?`Auto-picked ${n} races for the party favored to win. All the toss-ups are still yours to call.`:"Every non-toss-up race already has a pick."; commitMe();
 };
+function progress(p){
+  let total=0,made=0,tossLeft=0; const pk=(p&&p.picks)||{};
+  for(const ch in RACES) for(const id in RACES[ch].items){ total++; const k=ch+"-"+id;
+    if(pk[k]) made++; else if(RACES[ch].items[id].rating==="T") tossLeft++; }
+  return {total,made,tossLeft,left:total-made};
+}
 let lockArmed=null;
 $("lockBtn").onclick=()=>{
   const p=me(); if(!p||p.locked)return;
-  if(lockArmed){ clearTimeout(lockArmed); lockArmed=null; p.locked=true; p.lockedAt=new Date().toISOString(); commitMe(); return; }
-  $("lockBtn").textContent="Tap again to lock for good"; lockArmed=setTimeout(()=>{ lockArmed=null; renderPicks(); },3000);
+  if(lockArmed){ clearTimeout(lockArmed); lockArmed=null; p.locked=true; p.lockedAt=new Date().toISOString();
+    $("pkStatus").textContent="Picks submitted. They're locked in for the night."; commitMe(); return; }
+  const g=progress(p);
+  $("lockBtn").textContent= g.left?`${g.left} blank${g.left===1?"":"s"} · tap again to submit anyway`:"Tap again to submit · no changes after this";
+  lockArmed=setTimeout(()=>{ lockArmed=null; renderPicks(); },4000);
 };
 function setMode(m){ mode=m; ["board","picks","news"].forEach(x=>{ $("mode-"+x).setAttribute("aria-pressed",String(m===x)); $(x+"View").hidden=m!==x; });
   $("rtgBtn").hidden=m!=="board"; $("resetBtn").hidden=!(m==="board"&&isAdmin);
