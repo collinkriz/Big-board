@@ -96,6 +96,18 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .nsrc{font-family:var(--f-display);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:var(--panel-2);padding:2px 6px;border-radius:4px}
 .nhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .nhead h2{flex:1}
+.nhead .seg button{font-size:16px;padding:8px 14px;min-height:40px}
+.post{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;padding:14px 4px;border-bottom:1px solid var(--line)}
+.post .av{width:44px;height:44px;border-radius:50%;background:var(--panel-2);object-fit:cover}
+.post .ph{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;font-size:13px;color:var(--muted)}
+.post .ph b{color:var(--ink);font-size:15px}
+.post .ph a{color:var(--muted);text-decoration:none}
+.post .ph a:hover{text-decoration:underline}
+.post .tx{white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.45;margin-top:4px}
+.post .tx a{color:#8fb6ff}
+.post .lk{display:block;margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;color:var(--ink);text-decoration:none;font-size:13px;font-weight:600}
+.post .lk small{display:block;color:var(--muted);font-weight:400}
+.post .im{margin-top:8px;border-radius:10px;max-height:260px;max-width:100%;object-fit:cover;border:1px solid var(--line)}
 /* first-visit name prompt */
 .modal{position:fixed;inset:0;z-index:30;background:#0b1424ee;display:grid;place-items:center;padding:16px}
 .modal form{background:var(--panel-2);border:1px solid var(--line);border-radius:18px;padding:24px;width:min(420px,100%);box-sizing:border-box;display:flex;flex-direction:column;gap:14px}
@@ -284,6 +296,9 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
       <label class="pkstatus" for="importBox">Paste a results update from Claude</label>
       <textarea id="importBox" placeholder='{"sen-TX":{"winner":"R","reporting":90}}'></textarea>
       <div class="sh-foot"><button class="tbtn" id="importBtn">Publish update</button><button class="tbtn" id="signOut">Lock admin on this device</button></div>
+      <label class="pkstatus" for="socialList">Bluesky accounts in the Reporters feed, one per line</label>
+      <textarea id="socialList" placeholder="apnews.com"></textarea>
+      <div class="sh-foot"><button class="tbtn" id="socialSave">Save account list</button></div>
     </div>
     <p class="pkstatus" id="hostMsg"></p>
   </section>
@@ -369,10 +384,14 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
   <p class="foot" id="foot"></p>
   <div id="newsView" class="wrap" style="padding:0;max-width:none" hidden>
     <section class="card" aria-label="News">
-      <div class="nhead"><h2>Election news</h2>
+      <div class="nhead">
+        <div class="seg" role="group" aria-label="News source">
+          <button id="nsrc-social" aria-pressed="true">Reporters</button>
+          <button id="nsrc-heads" aria-pressed="false">Headlines</button>
+        </div>
         <button class="fchip" id="newsElec" aria-pressed="true">Election only</button>
         <button class="tbtn" id="newsRefresh">Refresh</button></div>
-      <p class="pkstatus" id="newsStatus">Loading headlines…</p>
+      <p class="pkstatus" id="newsStatus">Loading…</p>
       <div class="news" id="newsList"></div>
     </section>
   </div>
@@ -949,7 +968,7 @@ function setMode(m){
   else if(m!=="picks"&&prevRace){ race=prevRace; prevRace=null; }
   ["sen","house","gov"].forEach(x=>$("tab-"+x).setAttribute("aria-pressed",String(x===race)));
   mode=m; ["board","picks","news"].forEach(x=>{ $("mode-"+x).setAttribute("aria-pressed",String(m===x)); $(x+"View").hidden=m!==x; });
-  $("rtgBtn").hidden=m!=="board"; $("resetBtn").hidden=!(m==="board"&&isAdmin);
+  $("rtgBtn").hidden=m!=="board"; $("foot").hidden=m!=="board"; $("resetBtn").hidden=!(m==="board"&&isAdmin);
   document.querySelector('.seg[aria-label="Chamber"]').hidden=m!=="board"; $("filters").hidden=m==="news";
   if(!sheet.hidden)closeSheet(); if(m==="news") loadNews(); else paint(); }
 ["board","picks","news"].forEach(x=>$("mode-"+x).onclick=()=>setMode(x));
@@ -1011,7 +1030,8 @@ function applyAdmin(){
   $("previewBar").hidden=!previewing;
 }
 $("viewBtn").onclick=()=>{ if(!hostKey) return; isAdmin=!isAdmin; save("bb26-preview",!isAdmin); if(!sheet.hidden) closeSheet(); applyAdmin(); paint(); };
-$("adminBtn").onclick=()=>{ const open=$("adminPanel").hidden; $("adminPanel").hidden=!open; $("adminBtn").setAttribute("aria-pressed",String(open)); };
+$("adminBtn").onclick=()=>{ const open=$("adminPanel").hidden; $("adminPanel").hidden=!open; $("adminBtn").setAttribute("aria-pressed",String(open));
+  if(open&&isAdmin&&!$("socialList").value) fetch("/api/social").then(r=>r.json()).then(j=>{ if(!$("socialList").value) $("socialList").value=(j.handles||[]).join("\n"); }).catch(()=>{}); };
 $("hostSave").onclick=async()=>{
   const k=$("hostKey").value.trim(); if(!k){ hostMsg("Enter your admin key."); return; }
   hostKey=k;
@@ -1057,34 +1077,81 @@ $("dBack").onclick=()=>{ $("dview").hidden=true; stFilter=null; dState=null; pai
 const _paint=paint;
 paint=function(){ _paint(); renderDistricts(); };
 
-/* ---------- news ---------- */
-let newsItems=[], newsElec=true, newsAt=0;
-const ELEC=/elect|midterm|senat|house|congress|governor|gubernat|race|poll|vote|voter|ballot|project|call(ed)? |wins|flip|majority|democrat|republican|gop|campaign|exit/i;
-function ago(t){ const m=Math.round((Date.now()-t)/60000); if(!isFinite(m)) return ""; if(m<1) return "just now"; if(m<60) return m+" min ago"; const h=Math.round(m/60); return h<24?h+" hr ago":Math.round(h/24)+" d ago"; }
+/* ---------- news: Bluesky reporters + headlines ---------- */
+let newsSrc="social", newsElec=true, feeds={social:{items:[],at:0,note:""},heads:{items:[],at:0,note:""}}, socialHandles=[];
+const ELEC=/elect|midterm|senat|house|congress|governor|gubernat|race|poll|vote|voter|ballot|project|call(ed|s)?\b|wins?\b|flip|majority|democrat|republican|gop|campaign|exit|precinct|turnout|count/i;
+function ago(t){ const m=Math.round((Date.now()-t)/60000); if(!isFinite(m)||!t) return ""; if(m<1) return "just now"; if(m<60) return m+" min ago"; const h=Math.round(m/60); return h<24?h+" hr ago":Math.round(h/24)+" d ago"; }
+const stamp=()=>new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
 async function loadNews(force){
-  if(!force && Date.now()-newsAt<60000){ renderNews(); return; }
-  $("newsStatus").textContent="Loading headlines…";
+  const f=feeds[newsSrc];
+  if(!force && Date.now()-f.at<60000){ renderNews(); return; }
+  $("newsStatus").textContent= newsSrc==="social"?"Loading posts…":"Loading headlines…";
   try{
-    const r=await fetch("/api/news",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
-    const j=await r.json(); newsItems=j.items||[]; newsAt=Date.now();
-    const bad=(j.failed||[]); $("newsStatus").textContent=`Updated ${new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}`+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
-  }catch(e){ $("newsStatus").textContent="Couldn't load headlines. Check your connection and tap Refresh."; }
+    if(newsSrc==="social"){
+      const r=await fetch("/api/social",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
+      const j=await r.json(); f.items=j.posts||[]; socialHandles=j.handles||[];
+      if(document.activeElement!==$("socialList")) $("socialList").value=socialHandles.join("\n");
+      const bad=j.failed||[];
+      f.note=`Original posts from ${socialHandles.length-bad.length} newsrooms and analysts on Bluesky · no replies or reposts · updated ${stamp()}`+(isAdmin&&bad.length?` · couldn't load ${bad.join(", ")}`:"");
+    } else {
+      const r=await fetch("/api/news",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
+      const j=await r.json(); f.items=j.items||[]; const bad=j.failed||[];
+      f.note=`Updated ${stamp()}`+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
+    }
+    f.at=Date.now();
+  }catch(e){ f.note= newsSrc==="social"?"Couldn't load the reporter feed. Check your connection and tap Refresh.":"Couldn't load headlines. Check your connection and tap Refresh."; }
   renderNews();
 }
+function linkify(el,text){
+  const re=/https?:\/\/[^\s]+/g; let last=0, m;
+  while((m=re.exec(text))){ el.appendChild(document.createTextNode(text.slice(last,m.index)));
+    const a=document.createElement("a"); a.href=m[0]; a.target="_blank"; a.rel="noopener"; a.textContent=m[0].replace(/^https?:\/\//,"").slice(0,40)+(m[0].length>48?"…":""); el.appendChild(a); last=m.index+m[0].length; }
+  el.appendChild(document.createTextNode(text.slice(last)));
+}
 function renderNews(){
-  const list=$("newsList"); list.textContent="";
-  const its=newsItems.filter(x=>!newsElec||ELEC.test(x.title));
-  if(!its.length){ const e=document.createElement("div"); e.className="empty"; e.textContent=newsItems.length?"No election headlines right now. Turn off Election only to see everything.":"No headlines yet."; list.appendChild(e); return; }
-  for(const x of its.slice(0,80)){
-    const a=document.createElement("a"); a.className="nitem"; a.href=x.link; a.target="_blank"; a.rel="noopener";
-    a.innerHTML=`<span class="nt"></span><span class="nmeta"><span class="nsrc"></span><span class="nago"></span></span>`;
-    a.querySelector(".nt").textContent=x.title; a.querySelector(".nsrc").textContent=x.source; a.querySelector(".nago").textContent=ago(x.ts);
-    list.appendChild(a);
+  const f=feeds[newsSrc], list=$("newsList"); list.textContent=""; $("newsStatus").textContent=f.note||"";
+  const its=f.items.filter(x=>!newsElec||ELEC.test(newsSrc==="social"?(x.text+" "+(x.link?x.link.title:"")):x.title));
+  if(!its.length){ const e=document.createElement("div"); e.className="empty"; e.textContent=f.items.length?"Nothing election-related right now. Turn off Election only to see everything.":"Nothing here yet."; list.appendChild(e); return; }
+  if(newsSrc==="heads"){
+    for(const x of its.slice(0,80)){
+      const a=document.createElement("a"); a.className="nitem"; a.href=x.link; a.target="_blank"; a.rel="noopener";
+      a.innerHTML=`<span class="nt"></span><span class="nmeta"><span class="nsrc"></span><span class="nago"></span></span>`;
+      a.querySelector(".nt").textContent=x.title; a.querySelector(".nsrc").textContent=x.source; a.querySelector(".nago").textContent=ago(x.ts);
+      list.appendChild(a);
+    }
+    return;
+  }
+  for(const x of its.slice(0,100)){
+    const d=document.createElement("article"); d.className="post";
+    const av=document.createElement("img"); av.className="av"; av.alt=""; av.loading="lazy"; if(x.avatar) av.src=x.avatar; d.appendChild(av);
+    const body=document.createElement("div"); body.style.minWidth="0";
+    const ph=document.createElement("div"); ph.className="ph";
+    const nm=document.createElement("b"); nm.textContent=x.name; ph.appendChild(nm);
+    const hd=document.createElement("span"); hd.textContent="@"+x.handle; ph.appendChild(hd);
+    const t=document.createElement("a"); t.href=x.url; t.target="_blank"; t.rel="noopener"; t.textContent=ago(x.ts); ph.appendChild(t);
+    body.appendChild(ph);
+    const tx=document.createElement("div"); tx.className="tx"; linkify(tx,x.text); body.appendChild(tx);
+    if(x.link&&x.link.uri){ const l=document.createElement("a"); l.className="lk"; l.href=x.link.uri; l.target="_blank"; l.rel="noopener";
+      l.textContent=x.link.title||x.link.uri; const sm=document.createElement("small"); try{ sm.textContent=new URL(x.link.uri).hostname.replace(/^www\./,""); }catch(e){} l.appendChild(sm); body.appendChild(l); }
+    if(x.image){ const im=document.createElement("img"); im.className="im"; im.src=x.image; im.alt=""; im.loading="lazy"; body.appendChild(im); }
+    d.appendChild(body); list.appendChild(d);
   }
 }
+function setNewsSrc(v){ newsSrc=v; $("nsrc-social").setAttribute("aria-pressed",String(v==="social")); $("nsrc-heads").setAttribute("aria-pressed",String(v==="heads")); loadNews(); }
+$("nsrc-social").onclick=()=>setNewsSrc("social"); $("nsrc-heads").onclick=()=>setNewsSrc("heads");
 $("newsElec").onclick=()=>{ newsElec=!newsElec; $("newsElec").setAttribute("aria-pressed",String(newsElec)); renderNews(); };
 $("newsRefresh").onclick=()=>loadNews(true);
-setInterval(()=>{ if(mode==="news") loadNews(true); },120000);
+setInterval(()=>{ if(mode==="news") loadNews(true); },60000);
+$("socialSave").onclick=async()=>{
+  const handles=$("socialList").value.split(/[\s,]+/).map(h=>h.trim().replace(/^@/,"")).filter(Boolean);
+  try{
+    const r=await fetch("/api/social",{method:"POST",headers:{"content-type":"application/json","x-admin-key":hostKey},body:JSON.stringify({handles})});
+    if(r.status===403){ hostMsg("Your admin key was rejected."); return; }
+    if(!r.ok){ hostMsg("None of those look like Bluesky handles. Use the form name.bsky.social or a domain like apnews.com."); return; }
+    const j=await r.json(); hostMsg(`Saved ${j.handles.length} accounts. The Reporters feed updates for everyone.`); feeds.social.at=0;
+  }catch(e){ hostMsg("Couldn't save the list. Check your connection."); }
+};
+
 
 /* ---------- first-visit name prompt ---------- */
 function askName(){ if(myDraft&&myDraft.name) return; $("nameModal").hidden=false; setTimeout(()=>$("nameIn").focus(),50); }
