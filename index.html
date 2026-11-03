@@ -175,6 +175,21 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .proj .pside-r{text-align:right}
 @media (max-width:560px){ .proj{grid-template-columns:1fr 1fr} }
 .proj .verdict b{color:var(--ink)}
+.minimap{background:var(--panel-2);border-radius:12px;padding:6px}
+.mm{display:block;width:100%;height:auto;user-select:none;-webkit-user-select:none}
+.mm path{stroke:var(--panel-2);stroke-width:1;transition:fill .2s ease}
+.mm .tap{cursor:pointer}
+.mm text{font-family:var(--f-display);font-weight:700;font-size:13px;fill:#fff;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#0008;stroke-width:2.5px}
+.mm text.dim{fill:#4d5e7c;stroke:none}
+.mmhint{font-size:12px;color:var(--muted);padding:4px 6px 2px}
+.lbrow.tap{cursor:pointer}
+.lbrow.tap:hover{filter:brightness(1.15)}
+.lbrow.tap .who::after{content:"View board ›";display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:2px}
+.pblist{display:flex;flex-direction:column}
+.pbrow{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)}
+.pbn{flex:1;min-width:0}
+.pbn b{font-size:15px}
+.pbn small{display:block;color:var(--muted);font-size:12px}
 .rules{border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
 .rules summary{cursor:pointer;padding:12px 14px;font-weight:600;min-height:24px;list-style:none;display:flex;align-items:center;gap:8px}
 .rules summary::-webkit-details-marker{display:none}
@@ -344,7 +359,9 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
         <div class="pside-r"><span class="lab">GOP</span><span class="big pr" id="pjR">31</span></div>
         <div class="verdict" id="pjText"></div>
       </div>
+      <div class="minimap"><div id="myMap"></div><div class="mmhint" id="myMapHint">Tap a state to cycle your pick: Dem → GOP → blank.</div></div>
       <p class="pkstatus" id="pkProgress"></p>
+      <p class="pkstatus" id="peekNote"></p>
       <p class="pkstatus" id="pkStatus"></p>
       <div class="plist" id="plist"></div>
     </section>
@@ -362,6 +379,20 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
 </div>
 
 <div class="scrim" id="scrim" hidden></div>
+<div class="sheet" id="pbSheet" role="dialog" aria-modal="true" aria-labelledby="pbName" hidden>
+  <div class="sh-head">
+    <div><h3 id="pbName"></h3><p id="pbSub"></p></div>
+    <button class="x" id="pbClose" aria-label="Close" style="margin-left:auto">✕</button>
+  </div>
+  <div class="proj">
+    <div><span class="lab">Dem</span><span class="big pd" id="pbD"></span></div>
+    <div class="meter"><i class="m-d" id="pbMD"></i><i class="m-i" id="pbMI"></i><i class="m-u"></i><i class="m-r" id="pbMR"></i><span class="mid-line" style="left:50%"></span></div>
+    <div class="pside-r"><span class="lab">GOP</span><span class="big pr" id="pbR"></span></div>
+    <div class="verdict" id="pbText"></div>
+  </div>
+  <div class="minimap" id="pbMap"></div>
+  <div class="pblist" id="pbList"></div>
+</div>
 <div class="modal" id="nameModal" hidden>
   <form id="nameForm">
     <h2>Big Board</h2>
@@ -668,7 +699,7 @@ function openSheet(id){
 }
 function closeSheet(){ sheet.hidden=true; scrim.hidden=true; sel=null; paint(); }
 let setMine=function(id,patch){ const k=key(id); mine[k]=Object.assign({},mine[k],patch); save("bb26-mine",mine); paint(); }
-$("shClose").onclick=closeSheet; scrim.onclick=closeSheet;
+$("pbClose").onclick=closePlayer; $("shClose").onclick=closeSheet; scrim.onclick=()=>{ if(!$("pbSheet").hidden) closePlayer(); else closeSheet(); };
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&!sheet.hidden) closeSheet(); });
 const numIn=(id,k)=>$(id).addEventListener("change",e=>{ if(!sel)return; const v=e.target.value.trim(); setMine(sel,{[k]:v===""?undefined:v}); });
 numIn("inD","d"); numIn("inR","r"); numIn("inIn","inn");
@@ -775,6 +806,8 @@ function renderPicks(){
     const tb=r.pl.tb||{};
     const g=ch=>{ const v=tb[ch]; if(!v) return "no guess"; if(r.bonus[ch]) return `${v} (+${r.bonus[ch]})`; return finals[ch]==null?`${v} (pending)`:`${v}`; };
     d.querySelector("small").textContent=(r.pl.locked?"Submitted":"Still picking")+` · ${r.s.hit} of ${r.s.dec} called right`+(r.s.upsets?` · ${r.s.upsets} upset${r.s.upsets>1?"s":""}`:"")+` · ${r.s.made}/35 picked · Senate guess ${g("sen")} · House guess ${g("house")}`;
+    if(p.locked){ d.classList.add("tap"); d.tabIndex=0; d.setAttribute("role","button"); d.setAttribute("aria-label",`See ${r.pl.name||"this player"}'s board`);
+      d.onclick=()=>openPlayer(r.id); d.onkeydown=e=>{ if(e.key==="Enter") openPlayer(r.id); }; }
     lb.appendChild(d);
   });
   /* my controls */
@@ -788,13 +821,11 @@ function renderPicks(){
   const lk=$("lockBtn"); lk.classList.toggle("locked",!!p.locked); lk.disabled=!!p.locked;
   if(!lockArmed) lk.textContent=p.locked?"✅ Picks submitted":"✅ Submit my picks";
   const prog=progress(p);
-  { const pk=p.picks||{}; let d=RACES.sen.safeD, r=RACES.sen.safeR, i=0, blank=0;
-    for(const id in RACES.sen.items){ const v=pk["sen-"+id]; if(v==="D")d++; else if(v==="R")r++; else if(v==="I")i++; else blank++; }
-    $("pjD").textContent=d; $("pjR").textContent=r;
-    const w=n=>(n/100*100)+"%"; $("pjMD").style.width=w(d); $("pjMI").style.width=w(i); $("pjMR").style.width=w(r);
-    const ctl= r>=51?"Republicans keep control": r===50?"Republicans keep control with VP Vance breaking ties": d>=51?"Democrats flip the Senate": d+i>=51?"Control comes down to the independent":"Control still undecided";
-    $("pjText").innerHTML=`Your map: <b>D ${d} · R ${r}${i?" · I "+i:""}</b> → <b>${ctl}</b>`+(blank?` · ${blank} race${blank>1?"s":""} still blank`:"");
-    $("pjText").querySelectorAll("b")[1].textContent=ctl; }
+  renderProj(p.picks,"pj","Your map");
+  miniMap($("myMap"),p.picks,p.locked?null:cyclePick);
+  $("myMapHint").textContent= p.locked?"Your submitted map.":"Tap a state to cycle your pick: Dem → GOP → blank (Nebraska adds Independent).";
+  $("peekNote").textContent= p.locked?"Tap anyone on the leaderboard to see their full board.":"Other players' picks stay hidden until you submit yours.";
+  if(pbOpen) openPlayer(pbOpen);
   $("pkProgress").textContent= p.locked?`Submitted with ${prog.made} of ${prog.total} races picked. Good luck.`
     :`${prog.made} of ${prog.total} races picked · ${prog.tossLeft} toss-up${prog.tossLeft===1?"":"s"} still blank`;
   $("fillFav").disabled=!!p.locked;
@@ -820,8 +851,10 @@ function renderPicks(){
       b.onclick=()=>setPick(k,o); mpEl.appendChild(b); }
     const ot=row.querySelector(".others");
     for(const [,pl] of others){ const v=(pl.picks||{})[k]; const c=document.createElement("span");
-      c.className="ob"+(v?" "+v:"")+(r&&v?(v===r?" hit":" miss"):"");
-      c.textContent=`${(pl.name||"Friend").split(" ")[0]}: ${v||"—"}`; ot.appendChild(c); }
+      const fn=(pl.name||"Friend").split(" ")[0];
+      if(p.locked){ c.className="ob"+(v?" "+v:"")+(r&&v?(v===r?" hit":" miss"):""); c.textContent=`${fn}: ${v||"—"}`; }
+      else { c.className="ob"; c.textContent=`${fn}: ${v?"picked 🔒":"—"}`; }
+      ot.appendChild(c); }
     list.appendChild(row);
   }
 }
@@ -849,6 +882,67 @@ $("lockBtn").onclick=()=>{
   $("lockBtn").textContent= g.left?`${g.left} blank${g.left===1?"":"s"} · tap again to submit anyway`:"Tap again to submit · no changes after this";
   lockArmed=setTimeout(()=>{ lockArmed=null; renderPicks(); },4000);
 };
+function renderProj(picks,pre,label){
+  const pk=picks||{}; let d=RACES.sen.safeD, r=RACES.sen.safeR, i=0, blank=0;
+  for(const id in RACES.sen.items){ const v=pk["sen-"+id]; if(v==="D")d++; else if(v==="R")r++; else if(v==="I")i++; else blank++; }
+  $(pre+"D").textContent=d; $(pre+"R").textContent=r;
+  const w=n=>n+"%"; $(pre+"MD").style.width=w(d); $(pre+"MI").style.width=w(i); $(pre+"MR").style.width=w(r);
+  const ctl= r>=51?"Republicans keep control": r===50?"Republicans keep control with VP Vance breaking ties": d>=51?"Democrats flip the Senate": d+i>=51?"Control comes down to the independent":"Control still undecided";
+  const t=$(pre+"Text"); t.textContent=`${label}: `;
+  const b1=document.createElement("b"); b1.textContent=`D ${d} · R ${r}${i?" · I "+i:""}`; t.appendChild(b1);
+  t.appendChild(document.createTextNode(" → ")); const b2=document.createElement("b"); b2.textContent=ctl; t.appendChild(b2);
+  if(blank) t.appendChild(document.createTextNode(` · ${blank} race${blank>1?"s":""} blank`));
+}
+/* Senate map coloured by one player's picks */
+function miniMap(box,picks,onTap){
+  box.textContent="";
+  const svg=document.createElementNS(NS,"svg"); svg.setAttribute("viewBox","0 0 1010 593"); svg.setAttribute("class","mm");
+  svg.setAttribute("role","img"); svg.setAttribute("aria-label","Senate map of picks");
+  const colour=st=>{ if(!RACES.sen.items[st]) return "var(--off)"; const v=(picks||{})["sen-"+st]; return v?FILL[v]:"var(--open)"; };
+  const g=el("g",{}), lg=el("g",{}); svg.appendChild(g); svg.appendChild(lg);
+  for(const st in shapes){
+    const up=!!RACES.sen.items[st];
+    const pth=el("path",{d:shapes[st].getAttribute("d")}); pth.style.fill=colour(st);
+    if(up&&onTap){ pth.classList.add("tap"); pth.addEventListener("click",()=>onTap(st)); }
+    g.appendChild(pth);
+    if(labels[st]){ const t=el("text",{x:labels[st].getAttribute("x"),y:labels[st].getAttribute("y")}); t.textContent=st; if(!up) t.classList.add("dim"); lg.appendChild(t); }
+  }
+  SMALL.forEach((st,i)=>{ if(!RACES.sen.items[st]) return;
+    const c=el("g",{transform:`translate(958,${118+i*34})`}); const r=el("rect",{width:44,height:28,rx:6}); r.style.fill=colour(st); r.style.stroke="var(--panel-2)";
+    const t=el("text",{x:22,y:14}); t.textContent=st; c.appendChild(r); c.appendChild(t);
+    if(onTap){ c.classList.add("tap"); c.addEventListener("click",()=>onTap(st)); } svg.appendChild(c); });
+  box.appendChild(svg);
+}
+function cyclePick(st){
+  const p=me(); if(!p||p.locked) return; const k="sen-"+st, cur=(p.picks||{})[k];
+  const order= st==="NE"?["D","R","I",undefined]:["D","R",undefined];
+  const next=order[(order.indexOf(cur)+1)%order.length];
+  if(!p.picks) p.picks={}; if(next) p.picks[k]=next; else delete p.picks[k]; commitMe();
+}
+/* another player's full board, visible once you've submitted */
+let pbOpen=null;
+function openPlayer(id){
+  const pl=players[id]; if(!pl) return; pbOpen=id;
+  const nm=pl.name||"Player", first=nm.split(" ")[0];
+  $("pbName").textContent=nm+(id===meId?" (you)":"");
+  const sc=scoreOf(pl), tb=pl.tb||{};
+  $("pbSub").textContent=(pl.locked?"Submitted":"Still picking")+` · ${sc.pts} pts from races · Senate guess ${tb.sen||"–"} · House guess ${tb.house||"–"}`;
+  renderProj(pl.picks,"pb",`${first}'s map`);
+  miniMap($("pbMap"),pl.picks,null);
+  const list=$("pbList"); list.textContent="";
+  const its=Object.values(RACES.sen.items).sort((a,b)=>((RORDER[a.rating]??3)-(RORDER[b.rating]??3))||NAMES[a.st].localeCompare(NAMES[b.st]));
+  for(const it of its){
+    const k="sen-"+it.id, v=(pl.picks||{})[k], r=resultFor(k), f=favOf(it);
+    const row=document.createElement("div"); row.className="pbrow";
+    row.innerHTML=`<span class="pbn"><b></b><small></small></span><span class="pill"></span>`;
+    row.querySelector("b").textContent=NAMES[it.st];
+    row.querySelector("small").textContent=[it.rating?RTG_LABEL[it.rating]:"Solid "+it.holder, v&&f&&v!==f?"upset pick":null, r?`Result: ${r}`:null].filter(Boolean).join(" · ");
+    const pill=row.querySelector(".pill"); pill.className="pill p-"+(v||"none"); pill.textContent=(v?{D:"Dem",R:"GOP",I:"Ind"}[v]:"No pick")+(r&&v?(v===r?" ✓":" ✗"):"");
+    list.appendChild(row);
+  }
+  $("pbSheet").hidden=false; scrim.hidden=false;
+}
+function closePlayer(){ $("pbSheet").hidden=true; scrim.hidden=true; pbOpen=null; }
 let prevRace=null;
 function setMode(m){
   if(m==="picks"&&race!=="sen"){ prevRace=race; race="sen"; stFilter=null; $("dview").hidden=true; }
