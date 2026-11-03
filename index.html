@@ -166,6 +166,15 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .lbrow .who{min-width:0;font-weight:600;font-size:17px}
 .lbrow .who small{display:block;font-weight:400;color:var(--muted);font-size:12px}
 .lbrow .pts{font-family:var(--f-num);font-weight:700;font-size:30px;font-variant-numeric:tabular-nums;text-align:right;line-height:1}
+.rules{border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.rules summary{cursor:pointer;padding:12px 14px;font-weight:600;min-height:24px;list-style:none;display:flex;align-items:center;gap:8px}
+.rules summary::-webkit-details-marker{display:none}
+.rules summary::after{content:"＋";margin-left:auto;color:var(--muted)}
+.rules[open] summary::after{content:"－"}
+.rules table{width:100%;border-collapse:collapse;font-size:14px}
+.rules td{padding:8px 14px;border-top:1px solid var(--line);vertical-align:top}
+.rules td:last-child{text-align:right;font-family:var(--f-num);font-weight:700;white-space:nowrap}
+.rules p{margin:0;padding:10px 14px 14px;color:var(--muted);font-size:13px;line-height:1.5}
 .lbrow .pts small{display:block;font-family:var(--f-body);font-size:11px;color:var(--muted);font-weight:500}
 .mebar{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
 .mebar label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
@@ -294,15 +303,26 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     <section class="card" aria-label="Leaderboard">
       <h2>Leaderboard</h2>
       <div class="lb" id="lb"></div>
-      <p class="pkstatus" id="scoreNote">Correct pick on a Solid or Likely race = 1 point, Lean = 2, Toss-up = 3. Tiebreaker: closest guess at Dem Senate seats, then Dem House seats.</p>
+      <details class="rules" id="scoreNote">
+        <summary>ⓘ How scoring works</summary>
+        <table>
+          <tr><td>Correct pick, Solid or Likely race</td><td>1 pt</td></tr>
+          <tr><td>Correct pick, Lean race</td><td>2 pts</td></tr>
+          <tr><td>Correct pick, Toss-up</td><td>3 pts</td></tr>
+          <tr><td>Upset bonus: you called a race the forecasters' underdog won</td><td>+3 pts</td></tr>
+          <tr><td>Closest guess at total Dem House seats</td><td>+5 pts</td></tr>
+          <tr><td>Closest guess at total Dem Senate seats</td><td>+3 pts</td></tr>
+        </table>
+        <p>Ratings are the final pre-election forecasts shown on each race. Seat-guess bonuses are awarded once every race in that chamber is called; if two guesses are equally close, both get the points. Ties on the leaderboard go to whoever called more toss-ups correctly. Example: picking a Lean R race for the Democrat and being right earns 2 + 3 = 5 points.</p>
+      </details>
     </section>
     <section class="card" aria-label="Your picks">
       <h2 id="pkTitle">Your picks</h2>
       <div class="seg" id="localSw" role="group" aria-label="Picking as" hidden></div>
       <div class="mebar">
         <label class="nm" for="pkName">Your name<input id="pkName" maxlength="24" placeholder="Name"></label>
-        <label class="tb" for="tbSen">Dem Senate seats<input id="tbSen" inputmode="numeric" placeholder="e.g. 51"></label>
-        <label class="tb" for="tbHouse">Dem House seats<input id="tbHouse" inputmode="numeric" placeholder="e.g. 225"></label>
+        <label class="tb" for="tbSen">Dem Senate seats (+3)<input id="tbSen" inputmode="numeric" placeholder="e.g. 51"></label>
+        <label class="tb" for="tbHouse">Dem House seats (+5)<input id="tbHouse" inputmode="numeric" placeholder="e.g. 225"></label>
       </div>
       <div class="sh-foot">
         <button class="tbtn" id="fillFav">⚡ Auto-pick all non-toss-ups</button>
@@ -674,7 +694,8 @@ $("foot").textContent="Ratings are pre-election forecasts: House from Cook Polit
 
 /* ---------- predictions ---------- */
 let mode="board", players={}, meId="p1", pickStore="local", picksCol=null, myDraft=null, wTimer=null, writeChain=Promise.resolve();
-const WEIGHT={T:3,LD:2,LR:2};
+const WEIGHT={T:3,LD:2,LR:2}, UPSET=3, SEAT_BONUS={sen:3,house:5};
+const favOf=it=> it.rating==="LD"||it.rating==="KD"?"D": it.rating==="LR"||it.rating==="KR"?"R": !it.rating&&it.holder!=="N"?it.holder:null;
 const CH_LABEL={sen:"Senate",house:"House",gov:"Gov"};
 function initLocalPlayers(){
   players=load("bb26-players",{p1:{name:"Player 1",picks:{},tb:{}},p2:{name:"Player 2",picks:{},tb:{}}});
@@ -687,12 +708,14 @@ function resultFor(k){
   return null;
 }
 function raceOf(k){ const i=k.indexOf("-"); const ch=k.slice(0,i), id=k.slice(i+1); return RACES[ch]&&RACES[ch].items[id]; }
+const PICK_CH=["sen"]; /* the predictions game covers the Senate only */
+const inGame=k=>PICK_CH.includes(k.slice(0,k.indexOf("-")));
 function scoreOf(p){
-  let pts=0,hit=0,dec=0,made=0;
-  for(const k in (p.picks||{})){ const it=raceOf(k); if(!it)continue; made++;
+  let pts=0,hit=0,dec=0,made=0,toss=0,upsets=0;
+  for(const k in (p.picks||{})){ if(!inGame(k))continue; const it=raceOf(k); if(!it)continue; made++;
     const r=resultFor(k); if(!r)continue; dec++;
-    if(p.picks[k]===r){ hit++; pts+=WEIGHT[it.rating]||1; } }
-  return {pts,hit,dec,made};
+    if(p.picks[k]===r){ hit++; pts+=WEIGHT[it.rating]||1; if(it.rating==="T") toss++; const f=favOf(it); if(f&&r!==f){ pts+=UPSET; upsets++; } } }
+  return {pts,hit,dec,made,toss,upsets};
 }
 function actual(ch){ /* Dem seats so far, for the tiebreaker once everything is called */
   const R=RACES[ch]; let d=R.safeD, open=0;
@@ -716,9 +739,15 @@ function renderPicks(){
   const p=me()||{name:"",picks:{},tb:{}};
   /* leaderboard */
   const rows=Object.entries(players).map(([id,pl])=>({id,pl,s:scoreOf(pl)}));
-  const tbS=actual("sen"), tbH=actual("house");
-  const tbDist=pl=>{ const a=tbS!=null&&pl.tb&&pl.tb.sen!==""&&pl.tb.sen!=null?Math.abs(+pl.tb.sen-tbS):999, b=tbH!=null&&pl.tb&&pl.tb.house!=null&&pl.tb.house!==""?Math.abs(+pl.tb.house-tbH):999; return a*1000+b; };
-  rows.sort((a,b)=>(b.s.pts-a.s.pts)||(tbDist(a.pl)-tbDist(b.pl))||(b.s.hit-a.s.hit));
+  const finals={sen:actual("sen"),house:actual("house")};
+  rows.forEach(r=>r.bonus={});
+  for(const ch of ["sen","house"]){
+    const fin=finals[ch]; if(fin==null) continue;
+    const guesses=rows.map(r=>{ const g=r.pl.tb&&r.pl.tb[ch]; return (g===""||g==null||isNaN(+g))?null:Math.abs(+g-fin); });
+    const best=Math.min(...guesses.filter(x=>x!=null)); if(!isFinite(best)) continue;
+    rows.forEach((r,i)=>{ if(guesses[i]===best){ r.bonus[ch]=SEAT_BONUS[ch]; r.s.pts+=SEAT_BONUS[ch]; } });
+  }
+  rows.sort((a,b)=>(b.s.pts-a.s.pts)||(b.s.toss-a.s.toss)||(b.s.hit-a.s.hit));
   const lb=$("lb"); lb.textContent="";
   if(!rows.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No one has made picks yet. Make yours below; your friend's appear here as they pick."; lb.appendChild(e); }
   rows.forEach((r,i)=>{
@@ -726,7 +755,8 @@ function renderPicks(){
     d.innerHTML=`<span class="rk">${i+1}</span><span class="who"><span class="nmx"></span><small></small></span><span class="pts">${r.s.pts}<small>points</small></span>`;
     d.querySelector(".nmx").textContent=(r.pl.name||"Unnamed")+(r.id===meId?" (you)":"")+(r.pl.locked?" ✅":"");
     const tb=r.pl.tb||{};
-    d.querySelector("small").textContent=(r.pl.locked?"Submitted":"Still picking")+` · ${r.s.hit} of ${r.s.dec} called races right · ${r.s.made} picks made`+((tb.sen||tb.house)?` · tiebreak ${tb.sen||"–"} Sen / ${tb.house||"–"} House`:"");
+    const g=ch=>{ const v=tb[ch]; if(!v) return "no guess"; if(r.bonus[ch]) return `${v} (+${r.bonus[ch]})`; return finals[ch]==null?`${v} (pending)`:`${v}`; };
+    d.querySelector("small").textContent=(r.pl.locked?"Submitted":"Still picking")+` · ${r.s.hit} of ${r.s.dec} called right`+(r.s.upsets?` · ${r.s.upsets} upset${r.s.upsets>1?"s":""}`:"")+` · ${r.s.made}/35 picked · Senate guess ${g("sen")} · House guess ${g("house")}`;
     lb.appendChild(d);
   });
   /* my controls */
@@ -773,14 +803,14 @@ $("pkName").addEventListener("change",e=>{ const p=me(); if(!p)return; p.name=e.
 ["sen","house"].forEach(ch=>$(ch==="sen"?"tbSen":"tbHouse").addEventListener("change",e=>{ const p=me(); if(!p||p.locked)return; p.tb=Object.assign({},p.tb,{[ch]:e.target.value.trim()}); commitMe(); }));
 $("fillFav").onclick=()=>{
   const p=me(); if(!p||p.locked)return; p.picks=p.picks||{}; let n=0;
-  for(const ch in RACES) for(const id in RACES[ch].items){ const it=RACES[ch].items[id], k=ch+"-"+id; if(p.picks[k])continue;
-    const fav= it.rating==="LD"||it.rating==="KD"?"D": it.rating==="LR"||it.rating==="KR"?"R": !it.rating&&it.holder!=="N"?it.holder:null;
+  for(const ch of PICK_CH) for(const id in RACES[ch].items){ const it=RACES[ch].items[id], k=ch+"-"+id; if(p.picks[k])continue;
+    const fav=favOf(it);
     if(fav){ p.picks[k]=fav; n++; } }
-  $("pkStatus").textContent= n?`Auto-picked ${n} races for the party favored to win. All the toss-ups are still yours to call.`:"Every non-toss-up race already has a pick."; commitMe();
+  $("pkStatus").textContent= n?`Auto-picked ${n} Senate races for the party favored to win. The toss-ups are still yours to call.`:"Every non-toss-up race already has a pick."; commitMe();
 };
 function progress(p){
   let total=0,made=0,tossLeft=0; const pk=(p&&p.picks)||{};
-  for(const ch in RACES) for(const id in RACES[ch].items){ total++; const k=ch+"-"+id;
+  for(const ch of PICK_CH) for(const id in RACES[ch].items){ total++; const k=ch+"-"+id;
     if(pk[k]) made++; else if(RACES[ch].items[id].rating==="T") tossLeft++; }
   return {total,made,tossLeft,left:total-made};
 }
@@ -793,9 +823,14 @@ $("lockBtn").onclick=()=>{
   $("lockBtn").textContent= g.left?`${g.left} blank${g.left===1?"":"s"} · tap again to submit anyway`:"Tap again to submit · no changes after this";
   lockArmed=setTimeout(()=>{ lockArmed=null; renderPicks(); },4000);
 };
-function setMode(m){ mode=m; ["board","picks","news"].forEach(x=>{ $("mode-"+x).setAttribute("aria-pressed",String(m===x)); $(x+"View").hidden=m!==x; });
+let prevRace=null;
+function setMode(m){
+  if(m==="picks"&&race!=="sen"){ prevRace=race; race="sen"; stFilter=null; $("dview").hidden=true; }
+  else if(m!=="picks"&&prevRace){ race=prevRace; prevRace=null; }
+  ["sen","house","gov"].forEach(x=>$("tab-"+x).setAttribute("aria-pressed",String(x===race)));
+  mode=m; ["board","picks","news"].forEach(x=>{ $("mode-"+x).setAttribute("aria-pressed",String(m===x)); $(x+"View").hidden=m!==x; });
   $("rtgBtn").hidden=m!=="board"; $("resetBtn").hidden=!(m==="board"&&isAdmin);
-  document.querySelector('.seg[aria-label="Chamber"]').hidden=m==="news"; $("filters").hidden=m==="news";
+  document.querySelector('.seg[aria-label="Chamber"]').hidden=m!=="board"; $("filters").hidden=m==="news";
   if(!sheet.hidden)closeSheet(); if(m==="news") loadNews(); else paint(); }
 ["board","picks","news"].forEach(x=>$("mode-"+x).onclick=()=>setMode(x));
 /* identity: each device gets its own id and secret token */
