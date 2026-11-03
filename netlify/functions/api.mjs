@@ -26,6 +26,7 @@ function cleanCall(v) {
   if (!v || typeof v !== "object") return null;
   return {
     winner: PARTY.has(v.winner) ? v.winner : null,
+    lean: ["toss", "leanD", "leanR"].includes(v.lean) ? v.lean : undefined,
     reporting: num(v.reporting),
     note: str(v.note, 80) || undefined,
     caller: str(v.caller, 30) || undefined,
@@ -35,6 +36,44 @@ function cleanCall(v) {
       : [],
   };
 }
+
+// Headlines from major outlets across the spectrum. A feed that fails is skipped.
+const FEEDS = [
+  ["NPR", "https://feeds.npr.org/1014/rss.xml"],
+  ["PBS NewsHour", "https://www.pbs.org/newshour/feeds/rss/politics"],
+  ["BBC", "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml"],
+  ["NYT", "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml"],
+  ["Fox News", "https://moxie.foxnews.com/google-publisher/politics.xml"],
+  ["CBS News", "https://www.cbsnews.com/latest/rss/politics"],
+  ["ABC News", "https://abcnews.go.com/abcnews/politicsheadlines"],
+  ["Politico", "https://rss.politico.com/politics-news.xml"],
+  ["The Hill", "https://thehill.com/homenews/campaign/feed/"],
+];
+const decode = (t) =>
+  t.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]+>/g, "")
+   .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+   .replace(/&#39;|&apos;|&#8217;/g, "’").replace(/&#8216;/g, "‘").replace(/&#8220;|&#8221;/g, '"').replace(/&#8212;/g, "—").replace(/&#8211;/g, "–").trim();
+const tag = (block, name) => {
+  const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, "i"));
+  return m ? decode(m[1]) : "";
+};
+async function readFeed([source, url]) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { "user-agent": "BigBoard/1.0 (election night reader)" } });
+    if (!r.ok) throw new Error(String(r.status));
+    const xml = await r.text();
+    const blocks = xml.match(/<item[\s>][\s\S]*?<\/item>|<entry[\s>][\s\S]*?<\/entry>/gi) || [];
+    return blocks.slice(0, 25).map((b) => {
+      let link = tag(b, "link");
+      if (!link) { const m = b.match(/<link[^>]*href="([^"]+)"/i); link = m ? m[1] : ""; }
+      const when = tag(b, "pubDate") || tag(b, "updated") || tag(b, "published") || tag(b, "dc:date");
+      return { source, title: tag(b, "title"), link, ts: Date.parse(when) || 0 };
+    }).filter((x) => x.title && /^https?:\/\//.test(x.link));
+  } finally { clearTimeout(timer); }
+}
+let newsCache = { at: 0, body: null };
 
 export default async (req) => {
   const store = getStore({ name: "bigboard", consistency: "strong" });
@@ -54,6 +93,18 @@ export default async (req) => {
       })
     );
     return json({ calls, picks });
+  }
+
+  if (req.method === "GET" && path === "/news") {
+    if (newsCache.body && Date.now() - newsCache.at < 90000) return json(newsCache.body);
+    const results = await Promise.allSettled(FEEDS.map(readFeed));
+    const items = [], failed = [];
+    results.forEach((r, i) => (r.status === "fulfilled" ? items.push(...r.value) : failed.push(FEEDS[i][0])));
+    const seen = new Set();
+    const uniq = items.filter((x) => { const k = x.title.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+    uniq.sort((a, b) => b.ts - a.ts);
+    newsCache = { at: Date.now(), body: { items: uniq.slice(0, 150), failed } };
+    return json(newsCache.body);
   }
 
   if (req.method === "POST" && path === "/picks") {
