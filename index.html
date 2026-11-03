@@ -166,6 +166,15 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .lbrow .who{min-width:0;font-weight:600;font-size:17px}
 .lbrow .who small{display:block;font-weight:400;color:var(--muted);font-size:12px}
 .lbrow .pts{font-family:var(--f-num);font-weight:700;font-size:30px;font-variant-numeric:tabular-nums;text-align:right;line-height:1}
+.proj{display:grid;grid-template-columns:auto 1fr auto;gap:6px 14px;align-items:center;background:var(--panel-2);border-radius:12px;padding:12px 14px}
+.proj .big{font-family:var(--f-num);font-weight:700;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+.proj .pd{color:var(--dem)} .proj .pr{color:var(--rep);text-align:right}
+.proj .lab{font-family:var(--f-display);font-weight:700;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:block}
+.proj .meter{height:24px}
+.proj .verdict{grid-column:1/-1;font-size:14px;color:var(--muted);order:4}
+.proj .pside-r{text-align:right}
+@media (max-width:560px){ .proj{grid-template-columns:1fr 1fr} }
+.proj .verdict b{color:var(--ink)}
 .rules{border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
 .rules summary{cursor:pointer;padding:12px 14px;font-weight:600;min-height:24px;list-style:none;display:flex;align-items:center;gap:8px}
 .rules summary::-webkit-details-marker{display:none}
@@ -327,6 +336,12 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
       <div class="sh-foot">
         <button class="tbtn" id="fillFav">⚡ Auto-pick all non-toss-ups</button>
         <button class="tbtn lockb" id="lockBtn">✅ Submit my picks</button>
+      </div>
+      <div class="proj" aria-label="Senate breakdown from your picks">
+        <div><span class="lab">Dem</span><span class="big pd" id="pjD">34</span></div>
+        <div class="meter"><i class="m-d" id="pjMD"></i><i class="m-i" id="pjMI"></i><i class="m-u"></i><i class="m-r" id="pjMR"></i><span class="mid-line" style="left:50%"></span></div>
+        <div class="pside-r"><span class="lab">GOP</span><span class="big pr" id="pjR">31</span></div>
+        <div class="verdict" id="pjText"></div>
       </div>
       <p class="pkstatus" id="pkProgress"></p>
       <p class="pkstatus" id="pkStatus"></p>
@@ -770,6 +785,13 @@ function renderPicks(){
   const lk=$("lockBtn"); lk.classList.toggle("locked",!!p.locked); lk.disabled=!!p.locked;
   if(!lockArmed) lk.textContent=p.locked?"✅ Picks submitted":"✅ Submit my picks";
   const prog=progress(p);
+  { const pk=p.picks||{}; let d=RACES.sen.safeD, r=RACES.sen.safeR, i=0, blank=0;
+    for(const id in RACES.sen.items){ const v=pk["sen-"+id]; if(v==="D")d++; else if(v==="R")r++; else if(v==="I")i++; else blank++; }
+    $("pjD").textContent=d; $("pjR").textContent=r;
+    const w=n=>(n/100*100)+"%"; $("pjMD").style.width=w(d); $("pjMI").style.width=w(i); $("pjMR").style.width=w(r);
+    const ctl= r>=51?"Republicans keep control": r===50?"Republicans keep control with VP Vance breaking ties": d>=51?"Democrats flip the Senate": d+i>=51?"Control comes down to the independent":"Control still undecided";
+    $("pjText").innerHTML=`Your map: <b>D ${d} · R ${r}${i?" · I "+i:""}</b> → <b>${ctl}</b>`+(blank?` · ${blank} race${blank>1?"s":""} still blank`:"");
+    $("pjText").querySelectorAll("b")[1].textContent=ctl; }
   $("pkProgress").textContent= p.locked?`Submitted with ${prog.made} of ${prog.total} races picked. Good luck.`
     :`${prog.made} of ${prog.total} races picked · ${prog.tossLeft} toss-up${prog.tossLeft===1?"":"s"} still blank`;
   $("fillFav").disabled=!!p.locked;
