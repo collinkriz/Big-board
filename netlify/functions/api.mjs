@@ -75,6 +75,38 @@ async function readFeed([source, url]) {
 }
 let newsCache = { at: 0, body: null };
 
+// Bluesky: original posts (no replies, no reposts) from a curated list of newsrooms and analysts.
+const DEFAULT_HANDLES = [
+  "apnews.com", "reuters.com", "npr.org", "nytimes.com", "washingtonpost.com", "wsj.com",
+  "bloomberg.com", "politico.com", "axios.com", "nbcnews.com", "cnn.com", "propublica.org",
+  "gelliottmorris.com", "daveweigel.bsky.social",
+];
+const HANDLE = /^[a-z0-9][a-z0-9.-]{1,252}\.[a-z]{2,}$/i;
+let socialCache = { at: 0, key: "", body: null };
+async function readAuthor(handle) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const u = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=20&actor=" + encodeURIComponent(handle);
+    const r = await fetch(u, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(String(r.status));
+    const j = await r.json();
+    return (j.feed || []).filter((f) => !f.reason && f.post && f.post.record && f.post.record.text != null).map((f) => {
+      const p = f.post, a = p.author || {}, e = p.embed || {};
+      const rkey = String(p.uri || "").split("/").pop();
+      const ext = e.external || (e.media && e.media.external);
+      const imgs = e.images || (e.media && e.media.images) || [];
+      return {
+        handle: a.handle || handle, name: str(a.displayName || a.handle || handle, 60), avatar: a.avatar || "",
+        text: str(p.record.text, 600), ts: Date.parse(p.record.createdAt || p.indexedAt) || 0,
+        url: `https://bsky.app/profile/${a.handle || handle}/post/${rkey}`,
+        link: ext ? { uri: ext.uri, title: str(ext.title, 140) } : null,
+        image: imgs[0] ? imgs[0].thumb : "",
+      };
+    });
+  } finally { clearTimeout(timer); }
+}
+
 export default async (req) => {
   const store = getStore({ name: "bigboard", consistency: "strong" });
   const path = new URL(req.url).pathname.replace(/^\/api/, "");
@@ -105,6 +137,29 @@ export default async (req) => {
     uniq.sort((a, b) => b.ts - a.ts);
     newsCache = { at: Date.now(), body: { items: uniq.slice(0, 150), failed } };
     return json(newsCache.body);
+  }
+
+  if (req.method === "GET" && path === "/social") {
+    const handles = (await store.get("social", { type: "json" })) || DEFAULT_HANDLES;
+    const key = handles.join(",");
+    if (socialCache.body && socialCache.key === key && Date.now() - socialCache.at < 60000) return json(socialCache.body);
+    const results = await Promise.allSettled(handles.map(readAuthor));
+    const posts = [], failed = [];
+    results.forEach((r, i) => (r.status === "fulfilled" ? posts.push(...r.value) : failed.push(handles[i])));
+    posts.sort((a, b) => b.ts - a.ts);
+    socialCache = { at: Date.now(), key, body: { handles, failed, posts: posts.slice(0, 200) } };
+    return json(socialCache.body);
+  }
+
+  if (req.method === "POST" && path === "/social") {
+    const adminKey = Netlify.env.get("ADMIN_KEY");
+    if (!adminKey || req.headers.get("x-admin-key") !== adminKey) return json({ error: "wrong host key" }, 403);
+    const b = await req.json().catch(() => null);
+    const list = [...new Set(((b && b.handles) || []).map((h) => String(h).trim().replace(/^@/, "").toLowerCase()).filter((h) => HANDLE.test(h)))].slice(0, 40);
+    if (!list.length) return json({ error: "no valid handles" }, 400);
+    await store.setJSON("social", list);
+    socialCache = { at: 0, key: "", body: null };
+    return json({ ok: true, handles: list });
   }
 
   if (req.method === "POST" && path === "/picks") {
