@@ -37,7 +37,6 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .tools{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 .tbtn{border:1px solid var(--line);background:var(--panel);padding:10px 14px;border-radius:10px;font-weight:600;min-height:44px;display:inline-flex;align-items:center;gap:8px}
 .tbtn[aria-pressed="true"]{background:var(--ink);color:var(--studio);border-color:var(--ink)}
-#penBtn[aria-pressed="true"]{background:var(--ink-pen);color:#1a1400;border-color:var(--ink-pen)}
 .tbtn.warn{color:#ffb4ae}
 
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -75,8 +74,35 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 #map text.dim{fill:#5b6d8c;stroke:none}
 #map .chip rect{stroke:var(--studio);stroke-width:1;cursor:pointer}
 #map .chip text{font-size:12px}
-#ink{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-#ink.on{pointer-events:auto;touch-action:none;cursor:crosshair}
+/* district grid (House) */
+.dview{position:absolute;inset:0;background:var(--panel);border-radius:10px;display:flex;flex-direction:column;gap:10px;padding:12px;overflow:auto}
+.dhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dhead h3{margin:0;font-family:var(--f-display);font-weight:800;font-size:30px;text-transform:uppercase;letter-spacing:.02em;line-height:1}
+.dhead p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.dhead .tbtn{margin-left:auto}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:8px;align-content:start}
+.dtile{border:1px solid var(--line);border-radius:10px;padding:8px;min-height:78px;display:flex;flex-direction:column;justify-content:space-between;text-align:left;background:var(--off);color:var(--ink)}
+.dtile .dn{font-family:var(--f-display);font-weight:800;font-size:26px;line-height:1}
+.dtile small{font-size:11px;line-height:1.2;opacity:.9}
+.dtile.solid{cursor:default;color:var(--muted)}
+.dtile.sel{outline:3px solid var(--ink);outline-offset:1px}
+.dkey{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+/* news */
+.news{display:flex;flex-direction:column}
+.nitem{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:12px 4px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none}
+.nitem:hover .nt{text-decoration:underline}
+.nt{font-weight:600;font-size:16px;line-height:1.3;grid-column:1/-1}
+.nmeta{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center}
+.nsrc{font-family:var(--f-display);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:var(--panel-2);padding:2px 6px;border-radius:4px}
+.nhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.nhead h2{flex:1}
+/* first-visit name prompt */
+.modal{position:fixed;inset:0;z-index:30;background:#0b1424ee;display:grid;place-items:center;padding:16px}
+.modal form{background:var(--panel-2);border:1px solid var(--line);border-radius:18px;padding:24px;width:min(420px,100%);box-sizing:border-box;display:flex;flex-direction:column;gap:14px}
+.modal h2{margin:0;font-family:var(--f-display);font-weight:800;font-size:32px;text-transform:uppercase;line-height:1}
+.modal p{margin:0;color:var(--muted)}
+.modal input{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;color:var(--ink);font-size:20px;min-height:52px}
+.modal button{min-height:52px;border-radius:12px;border:0;background:var(--ink);color:var(--studio);font-family:var(--f-display);font-weight:800;font-size:20px;letter-spacing:.06em;text-transform:uppercase}
 .zoomout{position:absolute;top:14px;left:14px}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 6px 2px;font-size:12px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:6px}
@@ -188,6 +214,7 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     <div class="seg" role="group" aria-label="View">
       <button id="mode-board" aria-pressed="true">Board</button>
       <button id="mode-picks" aria-pressed="false">Predictions</button>
+      <button id="mode-news" aria-pressed="false">News</button>
     </div>
     <div class="seg" role="group" aria-label="Chamber">
       <button id="tab-sen" aria-pressed="true">Senate</button>
@@ -196,14 +223,13 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     </div>
     <div class="tools">
       <button class="tbtn" id="rtgBtn" aria-pressed="false">Show ratings</button>
-      <button class="tbtn" id="penBtn" aria-pressed="false">✎ Telestrator</button>
-      <button class="tbtn" id="clearInk" hidden>Clear ink</button>
-      <button class="tbtn" id="hostBtn" aria-pressed="false">Host</button>
-      <button class="tbtn warn" id="resetBtn">Reset</button>
+      <button class="tbtn" id="viewBtn" aria-pressed="false" hidden>👁 Viewer view</button>
+      <button class="tbtn" id="adminBtn" aria-pressed="false" hidden>⚙ Admin</button>
+      <button class="tbtn warn" id="resetBtn" hidden>Reset</button>
     </div>
   </header>
 
-  <div class="filters" role="group" aria-label="Filter races">
+  <div class="filters" id="filters" role="group" aria-label="Filter races">
     <span class="lab">Show</span>
     <button class="fchip" data-f="key" aria-pressed="false">Key races<span class="n"></span></button>
     <button class="fchip" data-f="toss" aria-pressed="false">Toss-ups<span class="n"></span></button>
@@ -213,16 +239,19 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
   </div>
 
   <div id="boardView" class="wrap" style="padding:0;max-width:none">
-  <section class="card" id="hostPanel" hidden>
-    <h2>Host controls</h2>
-    <p class="pkstatus">With your host key saved, every win you call on the Board is shared with everyone watching, and it counts for the predictions leaderboard.</p>
-    <div class="hostrow">
-      <label for="hostKey">Host key<input id="hostKey" type="password" autocomplete="off" placeholder="The ADMIN_KEY you set in Netlify"></label>
-      <button class="tbtn" id="hostSave">Save key</button>
+  <p class="pkstatus" id="previewBar" hidden style="background:var(--ink-pen);color:#1a1400;border-radius:10px;padding:10px 14px;font-weight:600;margin:0">You're seeing exactly what your friends see. Tap “Admin view” to make calls again.</p>
+  <section class="card" id="adminPanel" hidden>
+    <h2>Admin</h2>
+    <div id="adminLogin" class="hostrow">
+      <label for="hostKey">Admin key<input id="hostKey" type="password" autocomplete="off" placeholder="The ADMIN_KEY you set in Netlify"></label>
+      <button class="tbtn" id="hostSave">Unlock admin</button>
     </div>
-    <label class="pkstatus" for="importBox">Paste a results update from Claude</label>
-    <textarea id="importBox" placeholder='{"sen-TX":{"winner":"R","reporting":90}}'></textarea>
-    <div class="sh-foot"><button class="tbtn" id="importBtn">Publish update</button></div>
+    <div id="adminTools" hidden>
+      <p class="pkstatus">You run the main board. Every race you call goes to everyone watching and counts toward the predictions leaderboard. Nobody else sees these controls.</p>
+      <label class="pkstatus" for="importBox">Paste a results update from Claude</label>
+      <textarea id="importBox" placeholder='{"sen-TX":{"winner":"R","reporting":90}}'></textarea>
+      <div class="sh-foot"><button class="tbtn" id="importBtn">Publish update</button><button class="tbtn" id="signOut">Lock admin on this device</button></div>
+    </div>
     <p class="pkstatus" id="hostMsg"></p>
   </section>
   <section class="board" aria-label="Scoreboard">
@@ -236,7 +265,11 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     <section class="mapcard">
       <div class="mapbox" id="mapbox">
         <svg id="map" viewBox="0 0 1010 593" role="img" aria-label="Map of states with races this year"></svg>
-        <canvas id="ink"></canvas>
+        <div class="dview" id="dview" hidden>
+          <div class="dhead"><div><h3 id="dTitle"></h3><p id="dSub"></p></div><button class="tbtn" id="dBack">⤢ Full map</button></div>
+          <div class="dgrid" id="dgrid"></div>
+          <div class="dkey"><span><i class="sw" style="background:var(--dem)"></i>Dem win</span><span><i class="sw" style="background:var(--rep)"></i>GOP win</span><span><i class="sw" style="background:var(--toss)"></i>Toss-up</span><span><i class="sw" style="background:var(--dem-lean)"></i>Lean/Likely D</span><span><i class="sw" style="background:var(--rep-lean)"></i>Lean/Likely R</span><span><i class="sw" style="background:var(--off);border:1px solid var(--line)"></i>Solid seat</span></div>
+        </div>
         <button class="tbtn zoomout" id="zoomOut" hidden>⤢ Full map</button>
       </div>
       <div class="legend" id="legend">
@@ -280,9 +313,26 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     </section>
   </div>
   <p class="foot" id="foot"></p>
+  <div id="newsView" class="wrap" style="padding:0;max-width:none" hidden>
+    <section class="card" aria-label="News">
+      <div class="nhead"><h2>Election news</h2>
+        <button class="fchip" id="newsElec" aria-pressed="true">Election only</button>
+        <button class="tbtn" id="newsRefresh">Refresh</button></div>
+      <p class="pkstatus" id="newsStatus">Loading headlines…</p>
+      <div class="news" id="newsList"></div>
+    </section>
+  </div>
 </div>
 
 <div class="scrim" id="scrim" hidden></div>
+<div class="modal" id="nameModal" hidden>
+  <form id="nameForm">
+    <h2>Big Board</h2>
+    <p>What should we call you on the predictions leaderboard?</p>
+    <input id="nameIn" maxlength="24" autocomplete="given-name" placeholder="Your name" required>
+    <button type="submit">Let's go</button>
+  </form>
+</div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="shName" hidden>
   <div class="sh-head">
     <div><h3 id="shName">State</h3><p id="shSub"></p></div>
@@ -291,7 +341,8 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
   </div>
   <div class="livebox" id="shLive" hidden></div>
   <div class="calls" id="shCalls"></div>
-  <div class="nums">
+  <p class="pkstatus" id="shNote" hidden>Results are called by the host and update every 20 seconds.</p>
+  <div class="nums" id="shNums">
     <label for="inD">Dem %<input id="inD" inputmode="decimal" placeholder="—"></label>
     <label for="inR">GOP %<input id="inR" inputmode="decimal" placeholder="—"></label>
     <label for="inIn">% in<input id="inIn" inputmode="decimal" placeholder="—"></label>
@@ -363,6 +414,7 @@ const STATUS_LABEL={none:"Not called",toss:"Toss-up",leanD:"Lean D",leanR:"Lean 
 const FILL={none:"var(--open)",toss:"var(--toss)",leanD:"var(--dem-lean)",leanR:"var(--rep-lean)",D:"var(--dem)",R:"var(--rep)",I:"var(--ind)"};
 const RTG_FILL={T:"var(--toss)",LD:"var(--dem-lean)",LR:"var(--rep-lean)",KD:"var(--dem-likely)",KR:"var(--rep-likely)"};
 
+let hostKey=load("bb26-host",""), isAdmin=!!hostKey && !load("bb26-preview",false);
 let race="sen", filter="all", stFilter=null, sel=null, showRtg=false;
 const live={};
 
@@ -376,7 +428,8 @@ function statusOf(id){
   const L=live[key(id)];
   if(L && ["D","R","I"].includes(L.winner)) return {s:L.winner,live:true};
   const m=myRec(id);
-  if(m.s && m.s!=="none") return {s:m.s,live:false};
+  if(m.s && m.s!=="none" && isAdmin) return {s:m.s,live:false};
+  if(L && L.lean) return {s:L.lean,live:true};
   return {s:"none",live:false};
 }
 const isCalled=id=>["D","R","I"].includes(statusOf(id).s);
@@ -528,10 +581,10 @@ function renderCounts(){
 /* ---------- taps ---------- */
 function tapState(st){
   const its=byState(st); if(!its.length) return;
-  if(race==="house"){ stFilter=st; sel=null; zoomTo(st); paint(); if(innerWidth<=980) $("rail").scrollIntoView({behavior:"smooth",block:"start"}); }
+  if(race==="house"){ stFilter=st; sel=null; showDistricts(st); paint(); }
   else openSheet(its[0].id);
 }
-$("stFilter").onclick=()=>{ stFilter=null; zoomFull(); paint(); };
+$("stFilter").onclick=()=>{ stFilter=null; $("dview").hidden=true; paint(); };
 
 /* ---------- sheet ---------- */
 const sheet=$("sheet"), scrim=$("scrim");
@@ -563,6 +616,8 @@ function openSheet(id){
     fl.textContent=[L.reporting!=null?`${L.reporting}% of expected vote in`:null,L.updated?`updated ${L.updated}`:null].filter(Boolean).join(" · ");
     lb.appendChild(fl);
   } else lb.hidden=true;
+  $("shCalls").hidden=!isAdmin; $("shNums").hidden=!isAdmin; $("shClear").hidden=!isAdmin; $("shNote").hidden=isAdmin;
+  $("shZoom").hidden= race==="house";
   const calls=$("shCalls"); calls.textContent="";
   const opts=[["D","Dem win"],["toss","Toss-up"],["R","GOP win"],["leanD","Lean D"],[race==="sen"?"I":"none",race==="sen"?"Ind win":"Not called"],["leanR","Lean R"]];
   for(const [k,t] of opts){
@@ -601,28 +656,18 @@ function zoomFull(){ animVB(FULL); zoomOut.hidden=true; }
 $("shZoom").onclick=()=>{ if(!sel)return; const st=RACES[race].items[sel].st; closeSheet(); zoomTo(st); };
 zoomOut.onclick=()=>{ zoomFull(); if(stFilter){ stFilter=null; paint(); } };
 
-/* ---------- telestrator ---------- */
-const ink=$("ink"), ctx=ink.getContext("2d"); let pen=false, drawing=false;
-function sizeInk(){ const r=ink.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
-  ink.width=r.width*dpr; ink.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.lineCap="round"; ctx.lineJoin="round"; ctx.lineWidth=6; ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue("--ink-pen").trim()||"#ffe14a"; }
-new ResizeObserver(sizeInk).observe($("mapbox"));
-penBtn.onclick=()=>{ pen=!pen; penBtn.setAttribute("aria-pressed",String(pen)); ink.classList.toggle("on",pen); clearInk.hidden=!pen; };
-clearInk.onclick=()=>ctx.clearRect(0,0,ink.width,ink.height);
-const pt=e=>{const r=ink.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];};
-ink.addEventListener("pointerdown",e=>{ if(!pen)return; drawing=true; ink.setPointerCapture(e.pointerId); const [x,y]=pt(e); ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+.1,y+.1); ctx.stroke(); });
-ink.addEventListener("pointermove",e=>{ if(!drawing)return; const [x,y]=pt(e); ctx.lineTo(x,y); ctx.stroke(); });
-["pointerup","pointercancel"].forEach(n=>ink.addEventListener(n,()=>drawing=false));
-
 /* ---------- controls ---------- */
-function setRace(r){ race=r; stFilter=null; ["sen","house","gov"].forEach(x=>$("tab-"+x).setAttribute("aria-pressed",String(x===r))); if(!sheet.hidden)closeSheet(); zoomFull(); paint(); }
+function setRace(r){ race=r; stFilter=null; $("dview").hidden=true; ["sen","house","gov"].forEach(x=>$("tab-"+x).setAttribute("aria-pressed",String(x===r))); if(!sheet.hidden)closeSheet(); zoomFull(); paint(); }
 ["sen","house","gov"].forEach(x=>$("tab-"+x).onclick=()=>setRace(x));
 document.querySelectorAll(".fchip").forEach(b=>b.onclick=()=>{ filter=b.dataset.f; stFilter=null; paint(); });
 rtgBtn.onclick=()=>{ showRtg=!showRtg; rtgBtn.setAttribute("aria-pressed",String(showRtg)); paint(); };
 let armed=null;
 resetBtn.onclick=()=>{
-  if(armed){ clearTimeout(armed); armed=null; for(const k of Object.keys(mine)) if(k.startsWith(race+"-")) delete mine[k]; save("bb26-mine",mine); resetBtn.textContent="Reset"; paint(); return; }
-  resetBtn.textContent="Tap again to clear "+RACES[race].label; armed=setTimeout(()=>{armed=null;resetBtn.textContent="Reset";},3000);
+  if(armed){ clearTimeout(armed); armed=null; const out={};
+    for(const k of Object.keys(mine)) if(k.startsWith(race+"-")){ delete mine[k]; out[k]=null; }
+    for(const k of Object.keys(live)) if(k.startsWith(race+"-")) out[k]=null;
+    save("bb26-mine",mine); resetBtn.textContent="Reset"; pushCalls(out); paint(); return; }
+  resetBtn.textContent="Tap again to clear all "+RACES[race].label+" calls for everyone"; armed=setTimeout(()=>{armed=null;resetBtn.textContent="Reset";},3000);
 };
 $("foot").textContent="Ratings are pre-election forecasts: House from Cook Political Report's final ratings; Senate from Cook, with Nebraska, Mississippi and South Carolina from Fox News Power Rankings; governors from RealClearPolling. Races without a rating are shown as Solid for the party that holds them. House totals pre-count every Solid seat for its party. Results are shared by the host and refresh every 20 seconds.";
 
@@ -735,9 +780,11 @@ $("lockBtn").onclick=()=>{
   if(lockArmed){ clearTimeout(lockArmed); lockArmed=null; p.locked=true; p.lockedAt=new Date().toISOString(); commitMe(); return; }
   $("lockBtn").textContent="Tap again to lock for good"; lockArmed=setTimeout(()=>{ lockArmed=null; renderPicks(); },3000);
 };
-function setMode(m){ mode=m; $("mode-board").setAttribute("aria-pressed",String(m==="board")); $("mode-picks").setAttribute("aria-pressed",String(m==="picks"));
-  $("boardView").hidden=m!=="board"; $("picksView").hidden=m!=="picks"; ["rtgBtn","penBtn","resetBtn"].forEach(x=>$(x).hidden=m!=="board"); $("clearInk").hidden=!(m==="board"&&pen); if(!sheet.hidden)closeSheet(); paint(); }
-$("mode-board").onclick=()=>setMode("board"); $("mode-picks").onclick=()=>setMode("picks");
+function setMode(m){ mode=m; ["board","picks","news"].forEach(x=>{ $("mode-"+x).setAttribute("aria-pressed",String(m===x)); $(x+"View").hidden=m!==x; });
+  $("rtgBtn").hidden=m!=="board"; $("resetBtn").hidden=!(m==="board"&&isAdmin);
+  document.querySelector('.seg[aria-label="Chamber"]').hidden=m==="news"; $("filters").hidden=m==="news";
+  if(!sheet.hidden)closeSheet(); if(m==="news") loadNews(); else paint(); }
+["board","picks","news"].forEach(x=>$("mode-"+x).onclick=()=>setMode(x));
 /* identity: each device gets its own id and secret token */
 const rid=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
 let myToken=null;
@@ -765,40 +812,119 @@ async function pull(){
   paint();
 }
 
-/* ---------- host ---------- */
-let hostKey=load("bb26-host","");
+/* ---------- admin ---------- */
 const hostMsg=t=>{ $("hostMsg").textContent=t; };
 async function pushCalls(obj){
   if(!hostKey) return false;
   try{
     const r=await fetch("/api/calls",{method:"POST",headers:{"content-type":"application/json","x-admin-key":hostKey},body:JSON.stringify({calls:obj})});
-    if(r.status===403){ hostMsg("That host key doesn't match the ADMIN_KEY in Netlify."); return false; }
+    if(r.status===403){ hostMsg("That key doesn't match the ADMIN_KEY in Netlify."); return false; }
     if(!r.ok) throw new Error(r.status);
     pull(); return true;
   }catch(e){ hostMsg("Couldn't publish. Check your connection and try again."); return false; }
 }
 function shareCall(id){
-  if(!hostKey) return;
-  const m=myRec(id), win=["D","R","I"].includes(m.s)?m.s:null, cands=[];
+  if(!isAdmin) return;
+  const m=myRec(id), win=["D","R","I"].includes(m.s)?m.s:null, lean=["toss","leanD","leanR"].includes(m.s)?m.s:null, cands=[];
   if(m.d) cands.push({name:"Democrat",party:"D",pct:+m.d}); if(m.r) cands.push({name:"Republican",party:"R",pct:+m.r});
-  const rec= (win||cands.length||m.inn)?{winner:win,cands,reporting:m.inn?+m.inn:null,caller:"Host",updated:new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}:null;
+  const rec=(win||lean||cands.length||m.inn)?{winner:win,lean,cands,reporting:m.inn?+m.inn:null,caller:"Host",updated:new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}:null;
   pushCalls({[key(id)]:rec});
 }
 const _setMine=setMine;
 setMine=function(id,patch){ _setMine(id,patch); shareCall(id); };
-$("hostBtn").onclick=()=>{ const open=$("hostPanel").hidden; $("hostPanel").hidden=!open; $("hostBtn").setAttribute("aria-pressed",String(open)); $("hostKey").value=hostKey; };
+function applyAdmin(){
+  const unlocked=!!hostKey, previewing=unlocked&&!isAdmin;
+  $("adminBtn").hidden=!isAdmin && !(location.hash.includes("admin")&&!unlocked);
+  $("adminLogin").hidden=unlocked; $("adminTools").hidden=!unlocked;
+  if(previewing) $("adminPanel").hidden=true;
+  $("resetBtn").hidden=!(mode==="board"&&isAdmin);
+  const vb=$("viewBtn"); vb.hidden=!unlocked; vb.setAttribute("aria-pressed",String(previewing));
+  vb.textContent= previewing?"⚙ Admin view":"👁 Viewer view";
+  $("previewBar").hidden=!previewing;
+}
+$("viewBtn").onclick=()=>{ if(!hostKey) return; isAdmin=!isAdmin; save("bb26-preview",!isAdmin); if(!sheet.hidden) closeSheet(); applyAdmin(); paint(); };
+$("adminBtn").onclick=()=>{ const open=$("adminPanel").hidden; $("adminPanel").hidden=!open; $("adminBtn").setAttribute("aria-pressed",String(open)); };
 $("hostSave").onclick=async()=>{
-  hostKey=$("hostKey").value.trim(); save("bb26-host",hostKey);
-  if(!hostKey){ hostMsg("Host key removed. Your calls stay on this device."); return; }
-  if(await pushCalls({})) hostMsg("Host key works. Your calls now go to everyone.");
+  const k=$("hostKey").value.trim(); if(!k){ hostMsg("Enter your admin key."); return; }
+  hostKey=k;
+  if(await pushCalls({})){ isAdmin=true; save("bb26-host",hostKey); save("bb26-preview",false); $("hostKey").value=""; hostMsg("Admin unlocked on this device."); applyAdmin(); paint(); }
+  else { hostKey=""; }
 };
+$("signOut").onclick=()=>{ isAdmin=false; hostKey=""; save("bb26-host",""); hostMsg("Admin locked. This device is now view-only."); $("adminPanel").hidden=true; history.replaceState(null,"",location.pathname); applyAdmin(); paint(); };
 $("importBtn").onclick=async()=>{
   let obj; try{ obj=JSON.parse($("importBox").value); }catch(e){ hostMsg("That update isn't valid. Copy the whole block from Claude, including the braces."); return; }
-  if(!hostKey){ hostMsg("Save your host key first."); return; }
   if(await pushCalls(obj)){ hostMsg(`Published ${Object.keys(obj).length} races.`); $("importBox").value=""; }
 };
+window.addEventListener("hashchange",()=>{ if(location.hash.includes("admin")){ applyAdmin(); $("adminPanel").hidden=false; setMode("board"); } });
 
-initIdentity(); buildMap(); paint(); pull(); setInterval(pull,20000);
+/* ---------- House district grid ---------- */
+const SEATS={AL:7,AK:1,AZ:9,AR:4,CA:52,CO:8,CT:5,DE:1,FL:28,GA:14,HI:2,ID:2,IL:17,IN:9,IA:4,KS:4,KY:6,LA:6,ME:2,MD:8,MA:9,MI:13,MN:8,MS:4,MO:8,MT:2,NE:3,NV:4,NH:2,NJ:12,NM:3,NY:26,NC:14,ND:1,OH:15,OK:5,OR:6,PA:17,RI:2,SC:7,SD:1,TN:9,TX:38,UT:4,VT:1,VA:11,WA:10,WV:2,WI:8,WY:1};
+let dState=null;
+function showDistricts(st){ dState=st; $("dview").hidden=false; renderDistricts(); }
+function renderDistricts(){
+  if(!dState||$("dview").hidden) return;
+  const st=dState, n=SEATS[st]||1, R=RACES.house, g=$("dgrid"); g.textContent="";
+  const rated=byState(st); let open=0;
+  $("dTitle").textContent=NAMES[st];
+  for(let i=1;i<=n;i++){
+    const id= n===1?`${st}-AL`:`${st}-${i}`, it=R.items[id];
+    const t=document.createElement("button"); t.className="dtile";
+    let fill="var(--off)", fg="var(--ink)", line2="Solid seat";
+    if(it){
+      const s=statusOf(id).s;
+      if(["D","R"].includes(s)){ fill=FILL[s]; fg="#fff"; line2=(s==="D"?"Dem":"GOP")+" win ✓"; }
+      else { open++; fill= it.rating==="T"?RTG_FILL.T: (it.rating==="LD"||it.rating==="KD")?"var(--dem-lean)":"var(--rep-lean)"; line2=RTG_LABEL[it.rating]+(s!=="none"?" · "+STATUS_LABEL[s]:""); }
+      t.onclick=()=>openSheet(id);
+    } else { t.classList.add("solid"); t.disabled=true; }
+    if(id===sel) t.classList.add("sel");
+    t.style.background=fill; t.style.color=fg;
+    t.innerHTML=`<span class="dn">${n===1?"AL":i}</span><small></small>`;
+    t.querySelector("small").textContent= it?`${it.note}\n${line2}`:line2;
+    t.setAttribute("aria-label",`${NAMES[st]} district ${n===1?"at-large":i}: ${it?it.note+", "+line2:line2}`);
+    g.appendChild(t);
+  }
+  $("dSub").textContent=`${n} district${n>1?"s":""} · ${rated.length} competitive · ${open} still open`;
+}
+$("dBack").onclick=()=>{ $("dview").hidden=true; stFilter=null; dState=null; paint(); };
+const _paint=paint;
+paint=function(){ _paint(); renderDistricts(); };
+
+/* ---------- news ---------- */
+let newsItems=[], newsElec=true, newsAt=0;
+const ELEC=/elect|midterm|senat|house|congress|governor|gubernat|race|poll|vote|voter|ballot|project|call(ed)? |wins|flip|majority|democrat|republican|gop|campaign|exit/i;
+function ago(t){ const m=Math.round((Date.now()-t)/60000); if(!isFinite(m)) return ""; if(m<1) return "just now"; if(m<60) return m+" min ago"; const h=Math.round(m/60); return h<24?h+" hr ago":Math.round(h/24)+" d ago"; }
+async function loadNews(force){
+  if(!force && Date.now()-newsAt<60000){ renderNews(); return; }
+  $("newsStatus").textContent="Loading headlines…";
+  try{
+    const r=await fetch("/api/news",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
+    const j=await r.json(); newsItems=j.items||[]; newsAt=Date.now();
+    const bad=(j.failed||[]); $("newsStatus").textContent=`Updated ${new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}`+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
+  }catch(e){ $("newsStatus").textContent="Couldn't load headlines. Check your connection and tap Refresh."; }
+  renderNews();
+}
+function renderNews(){
+  const list=$("newsList"); list.textContent="";
+  const its=newsItems.filter(x=>!newsElec||ELEC.test(x.title));
+  if(!its.length){ const e=document.createElement("div"); e.className="empty"; e.textContent=newsItems.length?"No election headlines right now. Turn off Election only to see everything.":"No headlines yet."; list.appendChild(e); return; }
+  for(const x of its.slice(0,80)){
+    const a=document.createElement("a"); a.className="nitem"; a.href=x.link; a.target="_blank"; a.rel="noopener";
+    a.innerHTML=`<span class="nt"></span><span class="nmeta"><span class="nsrc"></span><span class="nago"></span></span>`;
+    a.querySelector(".nt").textContent=x.title; a.querySelector(".nsrc").textContent=x.source; a.querySelector(".nago").textContent=ago(x.ts);
+    list.appendChild(a);
+  }
+}
+$("newsElec").onclick=()=>{ newsElec=!newsElec; $("newsElec").setAttribute("aria-pressed",String(newsElec)); renderNews(); };
+$("newsRefresh").onclick=()=>loadNews(true);
+setInterval(()=>{ if(mode==="news") loadNews(true); },120000);
+
+/* ---------- first-visit name prompt ---------- */
+function askName(){ if(myDraft&&myDraft.name) return; $("nameModal").hidden=false; setTimeout(()=>$("nameIn").focus(),50); }
+$("nameForm").addEventListener("submit",e=>{ e.preventDefault(); const v=$("nameIn").value.trim().slice(0,24); if(!v) return;
+  myDraft.name=v; $("nameModal").hidden=true; $("pkStatus").textContent=""; commitMe(); });
+
+initIdentity(); applyAdmin(); buildMap(); paint(); pull(); setInterval(pull,20000); askName();
+if(location.hash.includes("admin")){ $("adminPanel").hidden=false; }
 })();
 </script>
 </body>
