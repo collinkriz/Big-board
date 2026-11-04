@@ -169,14 +169,11 @@ export default async (req) => {
 
   if (req.method === "GET" && path === "/callposts") {
     if (callCache.body && Date.now() - callCache.at < 45000) return json(callCache.body);
-    const archive = (await store.get("callarchive2", { type: "json" })) || [];
+    const archive = (await store.get("callarchive3", { type: "json" })) || [];
     const cold = archive.length === 0; // first run: reach further back to catch calls already scrolled off
-    const [results, heads] = await Promise.all([
-      Promise.allSettled(CALL_HANDLES.map((h) => readAuthorPages(h, cold ? 3 : 1))),
-      Promise.allSettled(FEEDS.map(readFeed)),
-    ]);
+    // Race calls come only from news organizations' official headline feeds (not social posts).
+    const heads = await Promise.allSettled(FEEDS.map(readFeed));
     const posts = [];
-    results.forEach((r) => { if (r.status === "fulfilled") posts.push(...r.value.filter((p) => CALL_WORDS.test(p.text) || (p.link && CALL_WORDS.test(p.link.title || "")))); });
     // news headlines (RSS) count as call sources too, labelled with the outlet's name
     heads.forEach((r) => { if (r.status === "fulfilled") posts.push(...r.value.filter((x) => CALL_WORDS.test(x.title)).map((x) => ({ handle: "rss", name: x.source, text: x.title, ts: x.ts || Date.now(), url: x.link, link: null }))); });
     // merge into the saved archive so calls are kept after they scroll out of the feeds
@@ -184,9 +181,9 @@ export default async (req) => {
     let added = 0;
     for (const p of posts) { const id = p.url + "|" + p.text; if (!seen.has(id)) { seen.add(id); archive.push({ handle: p.handle, name: p.name, text: p.text, ts: p.ts, url: p.url, link: p.link ? { title: p.link.title } : null }); added++; } }
     const cutoff = Date.now() - 36 * 3600 * 1000;
-    const kept = archive.filter((p) => p.ts >= cutoff).sort((a, b) => a.ts - b.ts).slice(-2000);
-    if (added || kept.length !== archive.length) await store.setJSON("callarchive2", kept);
-    callCache = { at: Date.now(), body: { posts: kept, failed: CALL_HANDLES.filter((_, i) => results[i].status !== "fulfilled") } };
+    const kept = archive.filter((p) => p.ts >= cutoff && p.handle === "rss").sort((a, b) => a.ts - b.ts).slice(-2000);
+    if (added || kept.length !== archive.length) await store.setJSON("callarchive3", kept);
+    callCache = { at: Date.now(), body: { posts: kept, failed: FEEDS.filter((_, i) => heads[i].status !== "fulfilled").map((f) => f[0]) } };
     return json(callCache.body);
   }
 
