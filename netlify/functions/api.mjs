@@ -29,10 +29,10 @@ function cleanCall(v) {
     lean: ["toss", "leanD", "leanR"].includes(v.lean) ? v.lean : undefined,
     reporting: num(v.reporting),
     note: str(v.note, 80) || undefined,
-    caller: str(v.caller, 30) || undefined,
+    caller: str(v.caller, 80) || undefined,
     updated: str(v.updated, 30) || undefined,
     cands: Array.isArray(v.cands)
-      ? v.cands.slice(0, 4).map((c) => ({ name: str(c && c.name, 40), party: PARTY.has(c && c.party) ? c.party : "I", pct: num(c && c.pct) ?? 0 }))
+      ? v.cands.slice(0, 4).map((c) => ({ name: str(c && c.name, 40), party: PARTY.has(c && c.party) ? c.party : "I", pct: num(c && c.pct) }))
       : [],
   };
 }
@@ -198,7 +198,12 @@ export default async (req) => {
     for (const [k, v] of Object.entries(incoming)) {
       if (!RACE_KEY.test(k)) continue;
       const c = cleanCall(v);
-      if (c) calls[k] = c; else delete calls[k];
+      if (c) {
+        const prev = calls[k];
+        // stamp when a race is first called (or flips), so the calls feed can sort by it
+        if (c.winner) c.calledAt = prev && prev.winner === c.winner && prev.calledAt ? prev.calledAt : new Date().toISOString();
+        calls[k] = c;
+      } else delete calls[k];
       n++;
     }
     if (n) await store.setJSON("calls", calls);
