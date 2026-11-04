@@ -91,7 +91,7 @@ async function readAuthor(handle, limit = 20) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
   try {
-    const u = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=${limit}&actor=" + encodeURIComponent(handle);
+    const u = `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=${Math.max(1, Math.min(100, limit))}&actor=${encodeURIComponent(handle)}`;
     const r = await fetch(u, { signal: ctrl.signal });
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
@@ -147,7 +147,7 @@ export default async (req) => {
     const handles = (await store.get("social", { type: "json" })) || DEFAULT_HANDLES;
     const key = handles.join(",");
     if (socialCache.body && socialCache.key === key && Date.now() - socialCache.at < 60000) return json(socialCache.body);
-    const results = await Promise.allSettled(handles.map(readAuthor));
+    const results = await Promise.allSettled(handles.map((h) => readAuthor(h, 30)));
     const posts = [], failed = [];
     results.forEach((r, i) => (r.status === "fulfilled" ? posts.push(...r.value) : failed.push(handles[i])));
     posts.sort((a, b) => b.ts - a.ts);
@@ -157,9 +157,14 @@ export default async (req) => {
 
   if (req.method === "GET" && path === "/callposts") {
     if (callCache.body && Date.now() - callCache.at < 45000) return json(callCache.body);
-    const results = await Promise.allSettled(CALL_HANDLES.map((h) => readAuthor(h, 60)));
+    const [results, heads] = await Promise.all([
+      Promise.allSettled(CALL_HANDLES.map((h) => readAuthor(h, 60))),
+      Promise.allSettled(FEEDS.map(readFeed)),
+    ]);
     const posts = [];
     results.forEach((r) => { if (r.status === "fulfilled") posts.push(...r.value.filter((p) => CALL_WORDS.test(p.text) || (p.link && CALL_WORDS.test(p.link.title || "")))); });
+    // news headlines (RSS) count as call sources too, labelled with the outlet's name
+    heads.forEach((r) => { if (r.status === "fulfilled") posts.push(...r.value.filter((x) => CALL_WORDS.test(x.title)).map((x) => ({ handle: "rss", name: x.source, text: x.title, ts: x.ts || Date.now(), url: x.link, link: null }))); });
     posts.sort((a, b) => a.ts - b.ts);
     callCache = { at: Date.now(), body: { posts, failed: CALL_HANDLES.filter((_, i) => results[i].status !== "fulfilled") } };
     return json(callCache.body);
