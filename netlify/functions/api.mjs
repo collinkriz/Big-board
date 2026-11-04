@@ -117,6 +117,7 @@ export default async (req) => {
 
   if (req.method === "GET" && path === "/state") {
     const calls = (await store.get("calls", { type: "json" })) || {};
+    const overrides = (await store.get("overrides", { type: "json" })) || {};
     const { blobs } = await store.list({ prefix: "picks/" });
     const picks = {};
     await Promise.all(
@@ -128,7 +129,7 @@ export default async (req) => {
         }
       })
     );
-    return json({ calls, picks });
+    return json({ calls, picks, overrides });
   }
 
   if (req.method === "GET" && path === "/news") {
@@ -179,6 +180,19 @@ export default async (req) => {
     await store.setJSON("social", list);
     socialCache = { at: 0, key: "", body: null };
     return json({ ok: true, handles: list });
+  }
+
+  // Uncall a wrong automatic call (blocks that winner for that race) or restore it.
+  if (req.method === "POST" && path === "/override") {
+    const b = await req.json().catch(() => null);
+    if (!b || !RACE_KEY.test(b.key || "") || !["uncall", "restore"].includes(b.action)) return json({ error: "bad request" }, 400);
+    const overrides = (await store.get("overrides", { type: "json" })) || {};
+    if (b.action === "uncall") {
+      if (!PARTY.has(b.block)) return json({ error: "bad request" }, 400);
+      overrides[b.key] = { block: b.block, by: str(b.by, 24), at: new Date().toISOString() };
+    } else delete overrides[b.key];
+    await store.setJSON("overrides", overrides);
+    return json({ ok: true, overrides });
   }
 
   if (req.method === "POST" && path === "/picks") {
