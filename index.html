@@ -12,7 +12,7 @@
 :root{
   --studio:#0b1424; --panel:#111d33; --panel-2:#17263f; --line:#24375a; --ink:#e8eef8; --muted:#8fa2c2;
   --dem:#2f74e8; --dem-lean:#2f74e870; --dem-likely:#2f74e840; --rep:#e5453b; --rep-lean:#e5453b70; --rep-likely:#e5453b40; --ind:#e9a93a;
-  --toss:#8a7fb0; --off:#1a2639; --open:#2a3a57; --ink-pen:#ffe14a; --focus:#ffe14a; --star:#ffd23f;
+  --toss:#8a7fb0; --off:#1a2639; --open:#c9d2e0; --ink-pen:#ffe14a; --focus:#ffe14a; --star:#ffd23f;
   --f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
   --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-num:"JetBrains Mono",ui-monospace,Menlo,monospace;
@@ -76,6 +76,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 #map path.faded{opacity:.28}
 #map text{font-family:var(--f-display);font-weight:700;font-size:13px;fill:#fff;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#0008;stroke-width:2.5px}
 #map text.dim{fill:#5b6d8c;stroke:none}
+#map text.lt,.mm text.lt{fill:#16213a;stroke:none}
 #map .chip rect{stroke:var(--studio);stroke-width:1;cursor:pointer}
 #map .chip text{font-size:12px}
 /* district grid (House) */
@@ -140,7 +141,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .right{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
 .rtg{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
 .pill{font-family:var(--f-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;padding:4px 8px;border-radius:6px;white-space:nowrap}
-.p-none{background:var(--open);color:var(--muted)} .p-toss{background:var(--toss);color:#fff}
+.p-none{background:var(--open);color:#16213a} .p-toss{background:var(--toss);color:#fff}
 .p-leanD{background:var(--dem-lean);color:#cfe0ff} .p-leanR{background:var(--rep-lean);color:#ffd5d1}
 .p-D{background:var(--dem);color:#fff} .p-R{background:var(--rep);color:#fff} .p-I{background:var(--ind);color:#231500}
 
@@ -649,12 +650,13 @@ function paint(){
       const open=byState(st).filter(it=>!isCalled(it.id)&&passes(it)).length;
       labels[st].textContent= race==="house"&&up&&vis&&open?`${st} ${open}`:st;
       labels[st].classList.toggle("dim",!up||!vis);
+      labels[st].classList.toggle("lt",up&&vis&&f==="var(--open)"&&!fw);
     }
   }
   for(const st of SMALL){
     const c=chips[st], f=stateFill(st);
     c.g.style.display=f?"":"none"; if(!f)continue;
-    const cfw=flipWinner(st); c.r.style.fill= cfw?`url(#flip${cfw})`:f; c.r.style.stroke= cfw?"var(--ink)":""; c.g.style.opacity=stateVisible(st)?1:.35;
+    const cfw=flipWinner(st); c.r.style.fill= cfw?`url(#flip${cfw})`:f; c.t.classList.toggle("lt",!cfw&&f==="var(--open)"); c.r.style.stroke= cfw?"var(--ink)":""; c.g.style.opacity=stateVisible(st)?1:.35;
   }
   $("lgI").hidden = true;
   renderCounts();
@@ -999,7 +1001,7 @@ function miniMap(box,picks,onTap){
     const pth=el("path",{d:shapes[st].getAttribute("d")}); pth.style.fill=colour(st);
     if(up&&onTap){ pth.classList.add("tap"); pth.addEventListener("click",()=>onTap(st)); }
     g.appendChild(pth);
-    if(labels[st]){ const t=el("text",{x:labels[st].getAttribute("x"),y:labels[st].getAttribute("y")}); t.textContent=st; if(!up) t.classList.add("dim"); lg.appendChild(t); }
+    if(labels[st]){ const t=el("text",{x:labels[st].getAttribute("x"),y:labels[st].getAttribute("y")}); t.textContent=st; if(!up) t.classList.add("dim"); else if(colour(st)==="var(--open)") t.classList.add("lt"); lg.appendChild(t); }
   }
   SMALL.forEach((st,i)=>{ if(!RACES.sen.items[st]) return;
     const c=el("g",{transform:`translate(958,${118+i*34})`}); const r=el("rect",{width:44,height:28,rx:6}); r.style.fill=colour(st); r.style.stroke="var(--panel-2)";
