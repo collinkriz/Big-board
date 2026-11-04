@@ -88,6 +88,51 @@ let socialCache = { at: 0, key: "", body: null };
 const CALL_HANDLES = ["apnews.com", "nbcnews.com", "npr.org", "cbsnews.com", "cnn.com", "nytimes.com", "washingtonpost.com"];
 const CALL_WORDS = /\b(wins?|won|projected|projects|race call|defeats|reelected|re-elected|holds?|keeps|retains|elected)\b/i;
 let callCache = { at: 0, body: null };
+// Wikipedia: nominees for every Senate/governor race, plus the winner once editors record it.
+const STATES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",VT:"Vermont",VA:"Virginia",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
+const SEN_UP = "AL AK AR CO DE FL GA ID IL IA KS KY LA ME MA MI MN MS MT NE NH NJ NM NC OH OK OR RI SC SD TN TX VA WV WY".split(" ");
+const GOV_UP = "AL AK AZ AR CA CO CT FL GA HI ID IL IA KS ME MD MA MI MN NE NV NH NM NY OH OK OR PA RI SC SD TN TX VT WI WY".split(" ");
+const SPECIAL = { FL: 1, OH: 1 };
+const wikiTitle = (ch, st) => ch === "sen"
+  ? `2026 United States Senate ${SPECIAL[st] ? "special " : ""}election in ${STATES[st]}`
+  : `2026 ${STATES[st]} gubernatorial election`;
+const partyOf = (v) => /democrat/i.test(v) ? "D" : /republican/i.test(v) ? "R" : /independent/i.test(v) ? "I" : null;
+const clean = (v) => String(v || "")
+  .replace(/<!--[\s\S]*?-->/g, "").replace(/<ref[^>]*\/>/g, "").replace(/<ref[\s\S]*?<\/ref>/g, "")
+  .replace(/\{\{[^{}]*\}\}/g, "").replace(/\[\[(?:[^|\]]*\|)?([^\]]*)\]\]/g, "$1").replace(/'{2,}/g, "").replace(/<[^>]+>/g, "").trim();
+function parseInfobox(text) {
+  const start = text.search(/\{\{\s*Infobox election/i); if (start < 0) return null;
+  const box = text.slice(start, start + 12000);
+  const f = {};
+  for (const line of box.split("\n")) { const m = line.match(/^\s*\|\s*([a-z_]+\d*)\s*=\s*(.*)$/i); if (m) f[m[1].toLowerCase()] = m[2]; }
+  const cands = [];
+  for (let i = 1; i <= 4; i++) { const name = clean(f["nominee" + i]), party = partyOf(f["party" + i] || ""); if (name && party) cands.push({ name, party }); }
+  let winner = null;
+  const after = clean(f.after_election), ap = partyOf(f.after_party || "");
+  if (after && ap) {
+    const a = after.toLowerCase();
+    const c = cands.find((c) => c.name.toLowerCase() === a || a.includes(c.name.split(" ").pop().toLowerCase()));
+    if (c && c.party === ap) winner = { name: c.name, party: ap };
+  }
+  return { cands, winner };
+}
+async function wikiBatch(titles) {
+  const u = "https://en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content|timestamp&rvslots=main&redirects=1&format=json&formatversion=2&titles=" + encodeURIComponent(titles.join("|"));
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(u, { signal: ctrl.signal, headers: { "user-agent": "BigBoard/1.0 (personal election-night scoreboard)" } });
+    if (!r.ok) throw new Error(String(r.status));
+    const j = await r.json(); const out = {};
+    const back = {}; for (const x of (j.query && j.query.redirects) || []) back[x.to] = x.from;
+    for (const p of (j.query && j.query.pages) || []) {
+      const rev = p.revisions && p.revisions[0]; if (!rev) continue;
+      out[back[p.title] || p.title] = { text: rev.slots ? rev.slots.main.content : rev.content, ts: Date.parse(rev.timestamp) || 0, title: p.title };
+    }
+    return out;
+  } finally { clearTimeout(timer); }
+}
+let wikiCache = { at: 0, body: null };
+
 async function readAuthor(handle, limit = 20, cursor = null) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
@@ -165,6 +210,22 @@ export default async (req) => {
     posts.sort((a, b) => b.ts - a.ts);
     socialCache = { at: Date.now(), key, body: { handles, failed, posts: posts.slice(0, 200) } };
     return json(socialCache.body);
+  }
+
+  if (req.method === "GET" && path === "/wiki") {
+    if (wikiCache.body && Date.now() - wikiCache.at < 90000) return json(wikiCache.body);
+    const keys = [...SEN_UP.map((s) => ["sen", s]), ...GOV_UP.map((s) => ["gov", s])];
+    const titles = keys.map(([ch, st]) => wikiTitle(ch, st));
+    const races = {}; let ok = 0;
+    const res = await Promise.allSettled([titles.slice(0, 40), titles.slice(40)].map(wikiBatch));
+    const pages = Object.assign({}, ...res.filter((r) => r.status === "fulfilled").map((r) => r.value));
+    keys.forEach(([ch, st], i) => {
+      const pg = pages[titles[i]]; if (!pg) return;
+      const info = parseInfobox(pg.text || ""); if (!info) return; ok++;
+      races[ch + "-" + st] = { cands: info.cands, winner: info.winner, ts: pg.ts, url: "https://en.wikipedia.org/wiki/" + encodeURIComponent(pg.title.replace(/ /g, "_")) };
+    });
+    wikiCache = { at: Date.now(), body: { races, pages: ok, failed: res.filter((r) => r.status !== "fulfilled").length } };
+    return json(wikiCache.body);
   }
 
   if (req.method === "GET" && path === "/callposts") {
