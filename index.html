@@ -209,6 +209,13 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .cf .tag{font-family:var(--f-display);font-weight:800;font-size:15px;letter-spacing:.04em;padding:6px 8px;border-radius:6px;color:#fff;white-space:nowrap}
 .cf .wh{min-width:0;font-weight:600;font-size:15px}
 .cf .wh small{display:block;font-weight:400;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cf .t1{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.chg{font-family:var(--f-display);font-weight:800;font-size:12px;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:5px;white-space:nowrap}
+.chg.hold{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.chg.flip{color:#fff;box-shadow:0 0 0 2px var(--ink) inset}
+.chg.newseat{background:transparent;border:1px dashed var(--line);color:var(--muted)}
+.cf.isflip{border-color:var(--ink)}
+.cfflips{font-family:var(--f-display);font-weight:800;letter-spacing:.08em;margin-left:8px;color:var(--ink)}
 .cf time{font-family:var(--f-num);font-size:12px;color:var(--muted);white-space:nowrap}
 .rules{border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
 .rules summary{cursor:pointer;padding:12px 14px;font-weight:600;min-height:24px;list-style:none;display:flex;align-items:center;gap:8px}
@@ -319,6 +326,7 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
 
   <section class="card callfeed" aria-label="Race calls">
     <h2>Race calls <span id="cfCount"></span></h2>
+    <p class="pkstatus" id="cfStatus" style="margin:0">Checking decision-desk sources…</p>
     <div class="cflist" id="cfList"></div>
   </section>
   <div class="main">
@@ -1008,7 +1016,7 @@ function rebuildLive(){
     live[k]= a&&a.winner ? a : au ? Object.assign({},a,au) : a; }
 }
 const STATE_LIST=Object.entries(NAMES).filter(([c])=>c!=="DC").sort((a,b)=>b[1].length-a[1].length);
-const WIN_RE=/\b(wins?|is projected to win|projected winner|defeats|reelected|re-elected|holds?)\b/i;
+const WIN_RE=/\b(wins?|will win|projected to win|projected winner|defeats|reelected|re-elected|holds?|victory|victorious)\b/i;
 const SKIP_RE=/\?|\bprimar(y|ies)\b|\bcould\b|\bwould\b|\bmight\b|\bpolls?\b|\bpolling\b|\bodds\b|\bchances?\b|\bhow\b|\bwhy\b|\bwho will\b|\brunoff\b|\bif\b|\bpredict/i;
 function findState(t){
   let best=null;
@@ -1064,8 +1072,12 @@ function buildAutoCalls(posts){
   return out;
 }
 async function pullCalls(){
-  try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
-    const j=await r.json(); autoCalls=buildAutoCalls(j.posts||[]); rebuildLive(); paint(); }catch(e){}
+  try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error("server "+r.status);
+    const j=await r.json(); const posts=j.posts||[]; autoCalls=buildAutoCalls(posts); rebuildLive();
+    const n=Object.keys(autoCalls).length, bad=j.failed||[];
+    $("cfStatus").textContent=`Scanned ${posts.length} possible call posts · ${n} race${n===1?"":"s"} called · checked ${stamp()}`+(autoConflicts.length?` · holding ${autoConflicts.join(", ")} (sources disagree)`:"")+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
+    paint(); }
+  catch(e){ $("cfStatus").textContent=`Couldn't reach the call sources (${e.message||"network error"}) · retrying every 30 seconds`; }
 }
 async function pull(){
   try{
@@ -1161,6 +1173,7 @@ function renderCalls(){
   const list=$("cfList"); if(!list) return; list.textContent="";
   const calls=Object.entries(live).filter(([,v])=>v&&v.winner).sort((a,b)=>(Date.parse(b[1].calledAt)||0)-(Date.parse(a[1].calledAt)||0));
   $("cfCount").textContent=calls.length?String(calls.length):"";
+  let flips=0; const flipNet={};
   if(!calls.length){ const e=document.createElement("div"); e.className="empty"; e.style.padding="4px 2px"; e.textContent="No races called yet. Calls from the decision desks show up here as soon as they're published."; list.appendChild(e); return; }
   for(const [k,v] of calls){
     const i=k.indexOf("-"), ch=k.slice(0,i), id=k.slice(i+1), it=RACES[ch]&&RACES[ch].items[id], st=id.split("-")[0];
@@ -1169,13 +1182,19 @@ function renderCalls(){
     b.innerHTML=`<span class="tag"></span><span class="wh"><span class="t1"></span><small></small></span><time></time>`;
     const tg=b.querySelector(".tag"); tg.textContent=ch==="house"?id.replace("-AL",""):st+" "+(ch==="sen"?"SEN":"GOV"); tg.style.background=FILL[v.winner];
     if(v.winner==="I") tg.style.color="#231500";
-    const flip= it&&it.holder!=="N"&&it.holder!==v.winner;
-    b.querySelector(".t1").textContent=`${wn&&wn.name?wn.name:PARTY_NAME[v.winner]} (${v.winner}) wins ${ch==="house"?NAMES[st]+" "+(id.endsWith("-AL")?"at-large":id.split("-")[1]+(["","st","nd","rd"][+id.split("-")[1]%10]&&![11,12,13].includes(+id.split("-")[1])?["","st","nd","rd"][+id.split("-")[1]%10]:"th"))+" District":NAMES[st]+" "+CH_NAME[ch]}`+(flip?" · FLIP":"");
+    const flip= it&&it.holder!=="N"&&it.holder!==v.winner, isNew= it&&it.holder==="N";
+    if(flip){ flips++; flipNet[v.winner]=(flipNet[v.winner]||0)+1; b.classList.add("isflip"); }
+    b.querySelector(".t1").textContent=`${wn&&wn.name?wn.name:PARTY_NAME[v.winner]} (${v.winner}) wins ${ch==="house"?NAMES[st]+" "+(id.endsWith("-AL")?"at-large":id.split("-")[1]+(["","st","nd","rd"][+id.split("-")[1]%10]&&![11,12,13].includes(+id.split("-")[1])?["","st","nd","rd"][+id.split("-")[1]%10]:"th"))+" District":NAMES[st]+" "+CH_NAME[ch]}`; { const badge=document.createElement("span"); badge.className="chg "+(flip?"flip":isNew?"newseat":"hold");
+      badge.textContent= flip?`${v.winner} flip from ${it.holder}`: isNew?"New seat":`${v.winner} hold`; if(flip) badge.style.background=FILL[v.winner]; if(flip&&v.winner==="I") badge.style.color="#231500";
+      b.querySelector(".t1").appendChild(badge); }
     b.querySelector("small").textContent= v.caller?`Called by ${v.caller}`:"Called";
     const t=Date.parse(v.calledAt); b.querySelector("time").textContent= t?new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"";
     b.onclick=()=>{ if(mode!=="board") setMode("board"); if(race!==ch) setRace(ch); if(it) openSheet(id); };
     list.appendChild(b);
   }
+  const h=document.querySelector(".callfeed h2"); let fl=$("cfFlips");
+  if(!fl){ fl=document.createElement("span"); fl.id="cfFlips"; fl.className="cfflips"; h.appendChild(fl); }
+  fl.textContent= flips?`· ${flips} flip${flips>1?"s":""}`+Object.entries(flipNet).map(([p,n])=>` (${p} +${n})`).join(""):"";
 }
 const _paint=paint;
 paint=function(){ _paint(); renderDistricts(); renderCalls(); };
