@@ -86,7 +86,7 @@ const HANDLE = /^[a-z0-9][a-z0-9.-]{1,252}\.[a-z]{2,}$/i;
 let socialCache = { at: 0, key: "", body: null };
 // Accounts whose posts are scanned for race calls (AP plus newsrooms that report the calls).
 const CALL_HANDLES = ["apnews.com", "nbcnews.com", "npr.org", "cbsnews.com", "cnn.com", "nytimes.com", "washingtonpost.com"];
-const CALL_WORDS = /\b(wins?|won|projected|projects|race call|defeats|reelected|re-elected|holds?|keeps|retains|elected)\b/i;
+const CALL_WORDS = /\b(wins?|won|projected|projects|race call|defeats|reelected|re-elected|holds?|keeps|retains|elected|flips?|captures?|picks up|takes|conced(e|es|ed|ing))\b/i;
 let callCache = { at: 0, body: null };
 // Wikipedia: nominees for every Senate/governor race, plus the winner once editors record it.
 const STATES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",VT:"Vermont",VA:"Virginia",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
