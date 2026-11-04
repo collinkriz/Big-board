@@ -440,7 +440,7 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
   </div>
   <div class="livebox" id="shLive" hidden></div>
   <div class="calls" id="shCalls"></div>
-  <p class="pkstatus" id="shNote" hidden>Results are called by the host and update every 20 seconds.</p>
+  <p class="pkstatus" id="shNote" hidden>Results come from decision-desk race calls and update automatically.</p>
   <div class="nums" id="shNums">
     <label for="inD">Dem %<input id="inD" inputmode="decimal" placeholder="—"></label>
     <label for="inR">GOP %<input id="inR" inputmode="decimal" placeholder="—"></label>
@@ -513,7 +513,7 @@ const STATUS_LABEL={none:"Not called",toss:"Toss-up",leanD:"Lean D",leanR:"Lean 
 const FILL={none:"var(--open)",toss:"var(--toss)",leanD:"var(--dem-lean)",leanR:"var(--rep-lean)",D:"var(--dem)",R:"var(--rep)",I:"var(--ind)"};
 const RTG_FILL={T:"var(--toss)",LD:"var(--dem-lean)",LR:"var(--rep-lean)",KD:"var(--dem-likely)",KR:"var(--rep-likely)"};
 
-let hostKey=load("bb26-host",""), isAdmin=!!hostKey && !load("bb26-preview",false);
+let hostKey="", isAdmin=false; /* admin mode removed: results come only from decision-desk calls */
 let race="sen", filter="all", stFilter=null, sel=null, showRtg=false;
 const live={};
 
@@ -768,7 +768,7 @@ resetBtn.onclick=()=>{
     save("bb26-mine",mine); resetBtn.textContent="Reset"; pushCalls(out); paint(); return; }
   resetBtn.textContent="Tap again to clear all "+RACES[race].label+" calls for everyone"; armed=setTimeout(()=>{armed=null;resetBtn.textContent="Reset";},3000);
 };
-$("foot").textContent="Ratings are pre-election forecasts: House from Cook Political Report's final ratings; Senate from Cook, with Nebraska, Mississippi and South Carolina from Fox News Power Rankings; governors from RealClearPolling. Races without a rating are shown as Solid for the party that holds them. House totals pre-count every Solid seat for its party. Results are shared by the host and refresh every 20 seconds.";
+$("foot").textContent="Ratings are pre-election forecasts: House from Cook Political Report's final ratings; Senate from Cook, with Nebraska, Mississippi and South Carolina from Fox News Power Rankings; governors from RealClearPolling. Races without a rating are shown as Solid for the party that holds them. House totals pre-count every Solid seat for its party. Race calls come automatically from AP and major newsrooms' posts on Bluesky.";
 
 /* ---------- predictions ---------- */
 let mode="board", players={}, meId="p1", pickStore="local", picksCol=null, myDraft=null, wTimer=null, writeChain=Promise.resolve();
@@ -998,11 +998,79 @@ function initIdentity(){
 /* ---------- shared server state ---------- */
 function setLiveText(t,on){ liveText.textContent=t; liveDot.classList.toggle("on",!!on); }
 let firstPull=true;
+
+/* ---------- automatic race calls from decision-desk posts on Bluesky ---------- */
+let adminCalls={}, autoCalls={}, autoConflicts=[];
+function rebuildLive(){
+  for(const k in live) delete live[k];
+  for(const k in autoCalls) live[k]=autoCalls[k];
+  for(const k in adminCalls){ const a=adminCalls[k], au=autoCalls[k];
+    live[k]= a&&a.winner ? a : au ? Object.assign({},a,au) : a; }
+}
+const STATE_LIST=Object.entries(NAMES).filter(([c])=>c!=="DC").sort((a,b)=>b[1].length-a[1].length);
+const WIN_RE=/\b(wins?|is projected to win|projected winner|defeats|reelected|re-elected|holds?)\b/i;
+const SKIP_RE=/\?|\bprimar(y|ies)\b|\bcould\b|\bwould\b|\bmight\b|\bpolls?\b|\bpolling\b|\bodds\b|\bchances?\b|\bhow\b|\bwhy\b|\bwho will\b|\brunoff\b|\bif\b|\bpredict/i;
+function findState(t){
+  let best=null;
+  for(const [c,n] of STATE_LIST){
+    const re= n==="Virginia"? /(?<!west\s)\bvirginia\b/i : n==="Kansas"? /(?<!ar)\bkansas\b/i : new RegExp("\\b"+n+"\\b","i");
+    const m=re.exec(t); if(m&&(!best||m.index<best.i)) best={c,i:m.index};
+  }
+  return best&&best.c;
+}
+function candsOf(note){ const out=[]; const re=/([A-Z][\w'’.-]+(?: [A-Z][\w'’.-]+)*) \(([DRI])\)/g; let m;
+  while((m=re.exec(note||""))){ const last=m[1].split(" ").pop(); out.push({last,party:m[2]}); } return out; }
+function partyBefore(t,end){ const seg=t.slice(0,end).toLowerCase(); let best=null;
+  for(const [w,p] of [["democrat","D"],["republican","R"],["gop","R"],["independent","I"]]){ const i=seg.lastIndexOf(w); if(i>=0&&(!best||i>best.i)) best={i,p}; }
+  return best&&best.p; }
+function parseCall(post){
+  const t=(post.text+" "+(post.link&&post.link.title||"")).replace(/\s+/g," ");
+  if(SKIP_RE.test(t)) return null;
+  const w=WIN_RE.exec(t); if(!w) return null;
+  const st=findState(t); if(!st) return null;
+  /* 1) match a named candidate in this state's Senate or governor race, closest before the win word */
+  let hit=null;
+  for(const ch of ["sen","gov"]){ const it=RACES[ch].items[st]; if(!it) continue;
+    for(const c of candsOf(it.note)){ const re=new RegExp("\\b"+c.last.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i"); const m=re.exec(t);
+      if(m&&m.index<w.index&&(!hit||m.index>hit.i)) hit={i:m.index,ch,party:c.party,name:c.last}; } }
+  if(hit) return {key:hit.ch+"-"+st,winner:hit.party,name:hit.name};
+  /* 2) otherwise office words + a party word before the win word */
+  const party=partyBefore(t,w.index); if(!party) return null;
+  if(/\bsenat(e|or)\b/i.test(t)&&RACES.sen.items[st]) return {key:"sen-"+st,winner:party};
+  if(/\b(governor|gubernatorial)\b/i.test(t)&&RACES.gov.items[st]) return {key:"gov-"+st,winner:party};
+  if(/\b(house|congressional|district|at-large)\b/i.test(t)){
+    const d=/(\d{1,2})(?:st|nd|rd|th)\s+(?:congressional\s+)?district/i.exec(t)||/district\s+(\d{1,2})\b/i.exec(t);
+    const id= d?`${st}-${+d[1]}`: /at-large/i.test(t)?`${st}-AL`:null;
+    const hi=id&&RACES.house.items[id];
+    if(hi){ const inc=hi.note&&!/^Open/.test(hi.note)?hi.note:null; const named=inc&&new RegExp("\\b"+inc.split(" ").pop()+"\\b","i").test(t);
+      return {key:"house-"+id,winner:party,name: named&&party===hi.holder?inc:undefined}; }
+  }
+  return null;
+}
+function callerName(p){ return p.handle==="apnews.com"?"AP":p.name.replace(/^The /,""); }
+function buildAutoCalls(posts){
+  const by={};
+  for(const p of posts){ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
+  const out={}; autoConflicts=[];
+  for(const k in by){ const arr=by[k]; const winners=[...new Set(arr.map(x=>x.c.winner))];
+    if(winners.length>1){ autoConflicts.push(k); continue; }
+    arr.sort((a,b)=>a.p.ts-b.p.ts);
+    const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP"));
+    const nm=arr.find(x=>x.c.name); 
+    out[k]={winner:winners[0],caller:callers.slice(0,3).join(", ")+" (via Bluesky)",calledAt:new Date(arr[0].p.ts).toISOString(),url:arr[0].p.url,auto:true,
+      cands: nm?[{name:nm.c.name,party:winners[0],pct:null}]:[]};
+  }
+  return out;
+}
+async function pullCalls(){
+  try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
+    const j=await r.json(); autoCalls=buildAutoCalls(j.posts||[]); rebuildLive(); paint(); }catch(e){}
+}
 async function pull(){
   try{
     const r=await fetch("/api/state",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
     const j=await r.json();
-    for(const k in live) delete live[k]; Object.assign(live,j.calls||{});
+    adminCalls=j.calls||{}; rebuildLive();
     const next=j.picks||{};
     if(firstPull && next[meId] && !Object.keys(myDraft.picks||{}).length && !myDraft.name){ myDraft=JSON.parse(JSON.stringify(next[meId])); save("bb26-mydraft",myDraft); }
     firstPull=false; next[meId]=myDraft; players=next;
@@ -1034,7 +1102,7 @@ const _setMine=setMine;
 setMine=function(id,patch){ _setMine(id,patch); shareCall(id); };
 function applyAdmin(){
   const unlocked=!!hostKey, previewing=unlocked&&!isAdmin;
-  $("adminBtn").hidden=!isAdmin && !(location.hash.includes("admin")&&!unlocked);
+  $("adminBtn").hidden=true; $("adminPanel").hidden=true;
   $("adminLogin").hidden=unlocked; $("adminTools").hidden=!unlocked;
   if(previewing) $("adminPanel").hidden=true;
   $("resetBtn").hidden=!(mode==="board"&&isAdmin);
@@ -1056,7 +1124,7 @@ $("importBtn").onclick=async()=>{
   let obj; try{ obj=JSON.parse($("importBox").value); }catch(e){ hostMsg("That update isn't valid. Copy the whole block from Claude, including the braces."); return; }
   if(await pushCalls(obj)){ hostMsg(`Published ${Object.keys(obj).length} races.`); $("importBox").value=""; }
 };
-window.addEventListener("hashchange",()=>{ if(location.hash.includes("admin")){ applyAdmin(); $("adminPanel").hidden=false; setMode("board"); } });
+
 
 /* ---------- House district grid ---------- */
 const SEATS={AL:7,AK:1,AZ:9,AR:4,CA:52,CO:8,CT:5,DE:1,FL:28,GA:14,HI:2,ID:2,IL:17,IN:9,IA:4,KS:4,KY:6,LA:6,ME:2,MD:8,MA:9,MI:13,MN:8,MS:4,MO:8,MT:2,NE:3,NV:4,NH:2,NJ:12,NM:3,NY:26,NC:14,ND:1,OH:15,OK:5,OR:6,PA:17,RI:2,SC:7,SD:1,TN:9,TX:38,UT:4,VT:1,VA:11,WA:10,WV:2,WI:8,WY:1};
@@ -1101,7 +1169,7 @@ function renderCalls(){
     const tg=b.querySelector(".tag"); tg.textContent=ch==="house"?id.replace("-AL",""):st+" "+(ch==="sen"?"SEN":"GOV"); tg.style.background=FILL[v.winner];
     if(v.winner==="I") tg.style.color="#231500";
     const flip= it&&it.holder!=="N"&&it.holder!==v.winner;
-    b.querySelector(".t1").textContent=`${wn&&wn.name?wn.name:PARTY_NAME[v.winner]} (${v.winner}) wins ${ch==="house"?"":NAMES[st]+" "}${CH_NAME[ch]}`+(flip?" · FLIP":"");
+    b.querySelector(".t1").textContent=`${wn&&wn.name?wn.name:PARTY_NAME[v.winner]} (${v.winner}) wins ${ch==="house"?NAMES[st]+" "+(id.endsWith("-AL")?"at-large":id.split("-")[1]+(["","st","nd","rd"][+id.split("-")[1]%10]&&![11,12,13].includes(+id.split("-")[1])?["","st","nd","rd"][+id.split("-")[1]%10]:"th"))+" District":NAMES[st]+" "+CH_NAME[ch]}`+(flip?" · FLIP":"");
     b.querySelector("small").textContent= v.caller?`Called by ${v.caller}`:"Called";
     const t=Date.parse(v.calledAt); b.querySelector("time").textContent= t?new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"";
     b.onclick=()=>{ if(mode!=="board") setMode("board"); if(race!==ch) setRace(ch); if(it) openSheet(id); };
@@ -1126,7 +1194,7 @@ async function loadNews(force){
       const j=await r.json(); f.items=j.posts||[]; socialHandles=j.handles||[];
       if(document.activeElement!==$("socialList")) $("socialList").value=socialHandles.join("\n");
       const bad=j.failed||[];
-      f.note=`Original posts from ${socialHandles.length-bad.length} newsrooms and analysts on Bluesky · no replies or reposts · updated ${stamp()}`+(isAdmin&&bad.length?` · couldn't load ${bad.join(", ")}`:"");
+      f.note=`Original posts from ${socialHandles.length-bad.length} newsrooms and analysts on Bluesky · no replies or reposts · updated ${stamp()}`+(bad.length?` · couldn't load ${bad.join(", ")}`:"");
     } else {
       const r=await fetch("/api/news",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
       const j=await r.json(); f.items=j.items||[]; const bad=j.failed||[];
@@ -1192,8 +1260,7 @@ function askName(){ if(myDraft&&myDraft.name) return; $("nameModal").hidden=fals
 $("nameForm").addEventListener("submit",e=>{ e.preventDefault(); const v=$("nameIn").value.trim().slice(0,24); if(!v) return;
   myDraft.name=v; $("nameModal").hidden=true; $("pkStatus").textContent=""; commitMe(); });
 
-initIdentity(); applyAdmin(); buildMap(); paint(); pull(); setInterval(pull,20000); askName();
-if(location.hash.includes("admin")){ $("adminPanel").hidden=false; }
+initIdentity(); applyAdmin(); buildMap(); paint(); pull(); setInterval(pull,20000); pullCalls(); setInterval(pullCalls,30000); askName();
 })();
 </script>
 </body>
