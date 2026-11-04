@@ -475,8 +475,8 @@ const RTG_LABEL={T:"Toss-up",LD:"Lean D",LR:"Lean R",KD:"Likely D",KR:"Likely R"
 /* Senate: [state, seat held by, rating, matchup] */
 const SEN=[
 ["AL","R",null,"Moore (R) vs. Wess (D)"],["AK","R","T","Sullivan (R) vs. Peltola (D)"],["AR","R",null,"Cotton (R) vs. Shoffner (D)"],
-["CO","D",null,"Hickenlooper (D) vs. Baisley (R)"],["DE","D",null,"Coons (D) vs. Katz (R)"],["FL","R",null,"Special election"],
-["GA","D",null,"Ossoff (D)"],["ID","R",null,"Risch (R) vs. Achilles (I)"],["IL","D",null,"Stratton (D) vs. Tracy (R)"],
+["CO","D",null,"Hickenlooper (D) vs. Baisley (R)"],["DE","D",null,"Coons (D) vs. Katz (R)"],["FL","R",null,"Moody (R) vs. Nixon (D) · special"],
+["GA","D",null,"Ossoff (D) vs. Collins (R)"],["ID","R",null,"Risch (R) vs. Achilles (I)"],["IL","D",null,"Stratton (D) vs. Tracy (R)"],
 ["IA","R","T","Hinson (R) vs. Turek (D)"],["KS","R","T","Marshall (R) vs. Hamilton (D)"],["KY","R",null,"Barr (R) vs. Booker (D)"],
 ["LA","R",null,""],["ME","R","T","Collins (R) vs. Jackson (D)"],["MA","D",null,"Markey (D) vs. Deaton (R)"],
 ["MI","D","LD","El-Sayed (D) vs. Rogers (R)"],["MN","D",null,"Open seat"],["MS","R","KR","Hyde-Smith (R) vs. Colom (D)"],
@@ -1044,9 +1044,13 @@ function parseCall(post){
   if(hit) return {key:hit.ch+"-"+st,winner:hit.party,name:hit.name};
   /* 2) otherwise office words + a party word before the win word */
   const party=partyBefore(t,w.index); if(!party) return null;
-  if(/\bsenat(e|or)\b/i.test(t)&&RACES.sen.items[st]) return {key:"sen-"+st,winner:party};
-  if(/\b(governor|gubernatorial)\b/i.test(t)&&RACES.gov.items[st]) return {key:"gov-"+st,winner:party};
-  if(/\b(house|congressional|district|at-large)\b/i.test(t)){
+  const near=(re)=>{ let best=Infinity, m; const g=new RegExp(re.source,"gi"); while((m=g.exec(t))){ const d=Math.abs(m.index-w.index)+(m.index<w.index?5:0); if(d<best) best=d; } return best; };
+  const dist={sen:near(/\bsenat(e|or)\b/), gov:near(/\b(governor|gubernatorial)\b/), house:near(/\b(house|congressional|district|at-large)\b/)};
+  const office=Object.keys(dist).filter(k=>isFinite(dist[k])).sort((a,b)=>dist[a]-dist[b])[0];
+  if(!office) return null;
+  if(office==="sen") return RACES.sen.items[st]?{key:"sen-"+st,winner:party}:null;
+  if(office==="gov") return RACES.gov.items[st]?{key:"gov-"+st,winner:party}:null;
+  {
     const d=/(\d{1,2})(?:st|nd|rd|th)\s+(?:congressional\s+)?district/i.exec(t)||/district\s+(\d{1,2})\b/i.exec(t);
     const id= d?`${st}-${+d[1]}`: /at-large/i.test(t)?`${st}-AL`:null;
     const hi=id&&RACES.house.items[id];
@@ -1062,7 +1066,13 @@ function buildAutoCalls(posts){
   for(const p of posts){ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
   const out={}; autoConflicts=[];
   for(const k in by){ const arr=by[k]; const winners=[...new Set(arr.map(x=>x.c.winner))];
-    if(winners.length>1){ autoConflicts.push(k); continue; }
+    if(winners.length>1){
+      const votes={}; for(const x of arr){ (votes[x.c.winner]=votes[x.c.winner]||new Set()).add(callerName(x.p)); }
+      const ranked=Object.entries(votes).sort((a,b)=>b[1].size-a[1].size);
+      if(ranked[0][1].size===ranked[1][1].size){ autoConflicts.push(k); continue; }
+      const keep=ranked[0][0]; for(let i=arr.length-1;i>=0;i--) if(arr[i].c.winner!==keep) arr.splice(i,1);
+      winners.length=0; winners.push(keep);
+    }
     arr.sort((a,b)=>a.p.ts-b.p.ts);
     const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP"));
     const nm=arr.find(x=>x.c.name); 
