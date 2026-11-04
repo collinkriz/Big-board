@@ -51,6 +51,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .side .lab{font-family:var(--f-display);font-weight:700;font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .side .big{font-family:var(--f-num);font-weight:700;font-size:44px;line-height:1;font-variant-numeric:tabular-nums}
 .side.d .big{color:var(--dem)} .side.r .big{color:var(--rep)}
+.flipn{font-family:var(--f-display);font-weight:800;font-size:15px;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:6px;width:max-content;color:#fff;margin:2px 0}
+.side.d .flipn{background:var(--dem)} .side.r .flipn{background:var(--rep)}
 .side .sub{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .meter{position:relative;height:34px;border-radius:8px;overflow:hidden;background:var(--off);display:flex}
 .meter i{display:block;height:100%;transition:width .4s ease}
@@ -342,9 +344,9 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     <p class="pkstatus" id="hostMsg"></p>
   </section>
   <section class="board" aria-label="Scoreboard">
-    <div class="side d"><span class="lab">Democrats</span><span class="big" id="dNum">0</span><span class="sub" id="dSub"></span></div>
+    <div class="side d"><span class="lab">Democrats</span><span class="big" id="dNum">0</span><span class="flipn" id="dFlip" hidden></span><span class="sub" id="dSub"></span></div>
     <div class="meter"><i class="m-d" id="mD"></i><i class="m-dl" id="mDL"></i><i class="m-i" id="mI"></i><i class="m-u"></i><i class="m-rl" id="mRL"></i><i class="m-r" id="mR"></i><span class="mid-line" id="midLine"></span></div>
-    <div class="side r"><span class="lab">Republicans</span><span class="big" id="rNum">0</span><span class="sub" id="rSub"></span></div>
+    <div class="side r"><span class="lab">Republicans</span><span class="big" id="rNum">0</span><span class="flipn" id="rFlip" hidden></span><span class="sub" id="rSub"></span></div>
     <div class="board-note" id="boardNote"></div>
   </section>
 
@@ -474,6 +476,10 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
   </div>
   <div class="livebox" id="shLive" hidden></div>
   <div class="calls" id="shCalls"></div>
+  <div id="shMark" hidden>
+    <p class="pkstatus" style="margin:0 0 6px">Called by the networks but not showing here? Mark it for everyone:</p>
+    <div class="sh-foot"><button class="tbtn" id="markD">Dem won</button><button class="tbtn" id="markR">GOP won</button><button class="tbtn" id="markI" hidden>Ind won</button></div>
+  </div>
   <p class="pkstatus" id="shNote" hidden>Results come from decision-desk race calls and update automatically.</p>
   <div class="nums" id="shNums">
     <label for="inD">Dem %<input id="inD" inputmode="decimal" placeholder="—"></label>
@@ -667,6 +673,7 @@ function renderBoard(){
   }
   /* In the House, unrated (Solid) seats are pre-counted; a rated seat counts once called. */
   const D=R.safeD+d, Rr=R.safeR+r, T=R.total;
+  for(const [el,n] of [["dFlip",fD],["rFlip",fR]]){ $(el).hidden=!n; $(el).textContent=`+${n} flip${n>1?"s":""}`; }
   $("dNum").textContent=D; $("rNum").textContent=Rr;
   const baseTxt= race==="house"?"Solid seats":"not up";
   $("dSub").textContent= ld?`+${ld} leaning`:`${R.safeD} ${baseTxt}`;
@@ -767,6 +774,9 @@ function openSheet(id){
   } else lb.hidden=true;
   $("shCalls").hidden=!isAdmin; $("shNums").hidden=!isAdmin; $("shClear").hidden=!isAdmin; $("shNote").hidden=isAdmin;
   $("shZoom").hidden= race==="house";
+  { const called=L&&L.winner; $("shMark").hidden=!!called; $("markI").hidden= !(race==="sen"&&id==="NE");
+    for(const [b,pty] of [["markD","D"],["markR","R"],["markI","I"]]){ const el=$(b); el.textContent={D:"Dem won",R:"GOP won",I:"Ind won"}[pty]; delete el.dataset.armed;
+      el.onclick=()=>{ if(el.dataset.armed){ setOverride(key(id),"call",pty); return; } el.dataset.armed="1"; el.textContent="Tap again to confirm"; setTimeout(()=>{ delete el.dataset.armed; el.textContent={D:"Dem won",R:"GOP won",I:"Ind won"}[pty]; },4000); }; } }
   const calls=$("shCalls"); calls.textContent="";
   const opts=[["D","Dem win"],["toss","Toss-up"],["R","GOP win"],["leanD","Lean D"],[race==="sen"?"I":"none",race==="sen"?"Ind win":"Not called"],["leanR","Lean R"]];
   for(const [k,t] of opts){
@@ -1072,12 +1082,14 @@ let firstPull=true;
 
 /* ---------- automatic race calls from decision-desk posts on Bluesky ---------- */
 let adminCalls={}, autoCalls={}, autoConflicts=[], overrides={}, pendingConfirm=[];
-const blocked=k=> overrides[k]&&autoCalls[k]&&autoCalls[k].winner===overrides[k].block;
+const blocked=k=> overrides[k]&&overrides[k].block&&autoCalls[k]&&autoCalls[k].winner===overrides[k].block;
 function rebuildLive(){
   for(const k in live) delete live[k];
   for(const k in autoCalls) if(!blocked(k)) live[k]=autoCalls[k];
   for(const k in adminCalls){ const a=adminCalls[k], au=autoCalls[k];
     live[k]= a&&a.winner ? a : (au&&!blocked(k)) ? Object.assign({},a,au) : a; }
+  for(const k in overrides){ const o=overrides[k]; if(o&&o.force&&!(live[k]&&live[k].winner&&!live[k].manual))
+    live[k]={winner:o.force,caller:`marked by ${o.by||"a viewer"}`,calledAt:o.at,manual:true,cands:[]}; }
 }
 const STATE_LIST=Object.entries(NAMES).filter(([c])=>c!=="DC").sort((a,b)=>b[1].length-a[1].length);
 const WIN_RE=/\b(wins?|will win|projected to win|projected winner|defeats|reelected|re-elected)\b/i;
@@ -1166,9 +1178,9 @@ function buildAutoCalls(posts){
   return out;
 }
 async function setOverride(k,action,block){
-  try{ const r=await fetch("/api/override",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:k,action,block,by:(myDraft&&myDraft.name)||""})});
+  try{ const r=await fetch("/api/override",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:k,action,block,winner:block,by:(myDraft&&myDraft.name)||""})});
     if(!r.ok) throw new Error(r.status); const j=await r.json(); overrides=j.overrides||{}; rebuildLive(); paint();
-    $("cfStatus").textContent= action==="uncall"?"Call removed for everyone. If outlets call it the other way, that call will still come through.":"Call restored."; }
+    $("cfStatus").textContent= action==="uncall"?"Call removed for everyone. If outlets call it the other way, that call will still come through.": action==="call"?"Marked as called for everyone.":"Done."; if(!sheet.hidden&&sel) openSheet(sel); }
   catch(e){ $("cfStatus").textContent="Couldn't change that call. Check your connection and try again."; }
 }
 async function pullCalls(){
@@ -1288,7 +1300,7 @@ function renderCalls(){
     b.querySelector(".t1").textContent=`${wn&&wn.name?wn.name:PARTY_NAME[v.winner]} (${v.winner}) wins ${ch==="house"?NAMES[st]+" "+(id.endsWith("-AL")?"at-large":id.split("-")[1]+(["","st","nd","rd"][+id.split("-")[1]%10]&&![11,12,13].includes(+id.split("-")[1])?["","st","nd","rd"][+id.split("-")[1]%10]:"th"))+" District":NAMES[st]+" "+CH_NAME[ch]}`; { const badge=document.createElement("span"); badge.className="chg "+(flip?"flip":isNew?"newseat":"hold");
       badge.textContent= flip?`${v.winner} flip from ${it.holder}`: isNew?"New seat":`${v.winner} hold`; if(flip) badge.style.background=FILL[v.winner]; if(flip&&v.winner==="I") badge.style.color="#231500";
       b.querySelector(".t1").appendChild(badge); }
-    b.querySelector("small").textContent= v.caller?`Called by ${v.caller}`:"Called";
+    b.querySelector("small").textContent= v.manual?`Marked called by ${(overrides[k]&&overrides[k].by)||"a viewer"}`: v.caller?`Called by ${v.caller}`:"Called";
     const t=Date.parse(v.calledAt); b.querySelector("time").textContent= t?new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"";
     b.onclick=()=>{ if(mode!=="board") setMode("board"); if(race!==ch) setRace(ch); if(it) openSheet(id); };
     const wrap=document.createElement("div"); wrap.className="cfwrap"; wrap.appendChild(b);
@@ -1303,7 +1315,8 @@ function renderCalls(){
         const tx=document.createElement("div"); tx.className="srct"; tx.textContent=`“${x.text}”`;
         const a=document.createElement("a"); a.href=x.url; a.target="_blank"; a.rel="noopener"; a.textContent="Open original ↗";
         q.appendChild(hd); q.appendChild(tx); if(x.url) q.appendChild(a); src.appendChild(q); } }
-    else { const q=document.createElement("div"); q.className="srcq"; q.textContent= v.caller?`Called by ${v.caller}. No source post attached.`:"No source post attached."; src.appendChild(q); }
+    else { const q=document.createElement("div"); q.className="srcq"; q.textContent= v.manual?`Marked called by ${(overrides[k]&&overrides[k].by)||"a viewer"} because no feed had posted it yet.`: v.caller?`Called by ${v.caller}. No source post attached.`:"No source post attached."; src.appendChild(q); }
+    if(v.manual){ const rb=document.createElement("button"); rb.className="tbtn uncall"; rb.textContent="Remove this manual call"; rb.onclick=(e)=>{ e.stopPropagation(); setOverride(k,"restore"); }; src.appendChild(rb); }
     if(v.auto){ const ub=document.createElement("button"); ub.className="tbtn uncall"; ub.textContent="Uncall this race";
       ub.onclick=(e)=>{ e.stopPropagation();
         if(ub.dataset.armed){ setOverride(k,"uncall",v.winner); return; }
