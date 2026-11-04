@@ -1082,7 +1082,11 @@ let firstPull=true;
 
 /* ---------- automatic race calls from decision-desk posts on Bluesky ---------- */
 let adminCalls={}, autoCalls={}, autoConflicts=[], overrides={}, pendingConfirm=[];
-const blocked=k=> overrides[k]&&overrides[k].block&&autoCalls[k]&&autoCalls[k].winner===overrides[k].block;
+const srcId=(url,text)=>(url||"")+"|"+String(text||"").slice(0,300);
+function ignoredByUncall(k,p){ const o=overrides[k]; if(!o||!o.block) return false;
+  if(o.ids&&o.ids.length) return o.ids.includes(srcId(p.url,p.text));
+  return (p.ts||0)<=(Date.parse(o.at)||0); /* older uncalls: ignore items published before the uncall */ }
+const blocked=k=>false;
 function rebuildLive(){
   for(const k in live) delete live[k];
   for(const k in autoCalls) if(!blocked(k)) live[k]=autoCalls[k];
@@ -1157,9 +1161,11 @@ function callerName(p){ return p.handle==="apnews.com"?"AP":p.handle==="wiki"?"W
 const viaOf=arr=>{ const w=new Set(arr.map(x=>x.p.handle==="rss"?"headlines":x.p.handle==="wiki"?"Wikipedia":"Bluesky")); return [...w].join(" & "); };
 function buildAutoCalls(posts){
   const by={};
-  for(const p of posts){ if(p.handle!=="rss") continue; /* headlines only */ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
+  for(const p of posts){ if(p.handle!=="rss") continue; /* headlines only */ const c=parseCall(p); if(!c||ignoredByUncall(c.key,p)) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
   for(const k in wikiRaces){ const w=wikiRaces[k]; if(!w.winner) continue;
-    (by[k]=by[k]||[]).push({c:{key:k,winner:w.winner.party,name:w.winner.name.split(" ").pop()},p:{handle:"wiki",name:"Wikipedia",text:`Results box lists ${w.winner.name} (${w.winner.party}) as elected`,ts:w.ts||Date.now(),url:w.url}}); }
+    const wp={handle:"wiki",name:"Wikipedia",text:`Results box lists ${w.winner.name} (${w.winner.party}) as elected`,ts:w.ts||Date.now(),url:w.url};
+    if(ignoredByUncall(k,wp)) continue;
+    (by[k]=by[k]||[]).push({c:{key:k,winner:w.winner.party,name:w.winner.name.split(" ").pop()},p:wp}); }
   const out={}; autoConflicts=[]; pendingConfirm=[];
   for(const k in by){ const arr=by[k]; const winners=[...new Set(arr.map(x=>x.c.winner))];
     if(winners.length>1){
@@ -1183,14 +1189,15 @@ function buildAutoCalls(posts){
   }
   return out;
 }
-async function setOverride(k,action,block){
-  try{ const r=await fetch("/api/override",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:k,action,block,winner:block,by:(myDraft&&myDraft.name)||""})});
+async function setOverride(k,action,block,ids){
+  try{ const r=await fetch("/api/override",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:k,action,block,winner:block,ids:ids||[],by:(myDraft&&myDraft.name)||""})});
     if(!r.ok) throw new Error(r.status); const j=await r.json(); overrides=j.overrides||{}; rebuildLive(); paint();
-    $("cfStatus").textContent= action==="uncall"?"Call removed for everyone. If outlets call it the other way, that call will still come through.": action==="call"?"Marked as called for everyone.":"Done."; if(!sheet.hidden&&sel) openSheet(sel); }
+    autoCalls=buildAutoCalls(lastPosts); rebuildLive(); paint();
+    $("cfStatus").textContent= action==="uncall"?"Call removed for everyone. New headlines or results can still call this race.": action==="call"?"Marked as called for everyone.":"Done."; if(!sheet.hidden&&sel) openSheet(sel); }
   catch(e){ $("cfStatus").textContent="Couldn't change that call. Check your connection and try again."; }
 }
 /* Wikipedia: nominee names for every race (so headlines naming a candidate can be matched), plus recorded winners */
-let wikiRaces={};
+let wikiRaces={}, lastPosts=[];
 function candsFor(ch,st){
   const it=RACES[ch].items[st]; const out=candsOf(it&&it.note);
   const w=wikiRaces[ch+"-"+st];
@@ -1208,7 +1215,7 @@ async function pullWiki(){
 }
 async function pullCalls(){
   try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error("server "+r.status);
-    const j=await r.json(); const posts=j.posts||[]; autoCalls=buildAutoCalls(posts); rebuildLive();
+    const j=await r.json(); const posts=j.posts||[]; lastPosts=posts; autoCalls=buildAutoCalls(posts); rebuildLive();
     const n=Object.keys(autoCalls).length, bad=j.failed||[];
     $("cfStatus").textContent=`Scanned ${posts.length} news headlines · ${n} race${n===1?"":"s"} called · checked ${stamp()}`+(autoConflicts.length?` · holding ${autoConflicts.join(", ")} (sources disagree)`:"")+(pendingConfirm.length?` · waiting for a 2nd source on ${pendingConfirm.join(", ")}`:"")+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
     paint(); }
@@ -1342,19 +1349,19 @@ function renderCalls(){
     if(v.manual){ const rb=document.createElement("button"); rb.className="tbtn uncall"; rb.textContent="Remove this manual call"; rb.onclick=(e)=>{ e.stopPropagation(); setOverride(k,"restore"); }; src.appendChild(rb); }
     if(v.auto){ const ub=document.createElement("button"); ub.className="tbtn uncall"; ub.textContent="Uncall this race";
       ub.onclick=(e)=>{ e.stopPropagation();
-        if(ub.dataset.armed){ setOverride(k,"uncall",v.winner); return; }
+        if(ub.dataset.armed){ setOverride(k,"uncall",v.winner,(v.sources||[]).map(x=>srcId(x.url,x.text))); return; }
         ub.dataset.armed="1"; ub.textContent=`Tap again: remove this ${v.winner} call for everyone`; setTimeout(()=>{ delete ub.dataset.armed; ub.textContent="Uncall this race"; },4000); };
       src.appendChild(ub); }
     wrap.appendChild(src);
     list.appendChild(wrap);
   }
   /* races someone uncalled, with a way to restore them */
-  const ov=Object.entries(overrides).filter(([k])=>blocked(k));
+  const ov=Object.entries(overrides).filter(([k,o])=>o&&o.block&&!(live[k]&&live[k].winner));
   if(ov.length){ const box=document.createElement("div"); box.className="uncalled";
     const t=document.createElement("div"); t.className="srch"; t.textContent="Uncalled"; box.appendChild(t);
     for(const [k,o] of ov){ const i=k.indexOf("-"), ch=k.slice(0,i), id=k.slice(i+1), st=id.split("-")[0];
       const r=document.createElement("div"); r.className="ucrow";
-      const tx=document.createElement("span"); tx.textContent=`${ch==="house"?id:NAMES[st]+" "+CH_NAME[ch]}: ${PARTY_NAME[o.block]} call removed${o.by?" by "+o.by:""}`;
+      const tx=document.createElement("span"); tx.textContent=`${ch==="house"?id:NAMES[st]+" "+CH_NAME[ch]}: ${PARTY_NAME[o.block]} call removed${o.by?" by "+o.by:""} · waiting for new reports`;
       const rb=document.createElement("button"); rb.className="tbtn"; rb.textContent="Restore"; rb.onclick=()=>setOverride(k,"restore");
       r.appendChild(tx); r.appendChild(rb); box.appendChild(r); }
     list.appendChild(box); }
