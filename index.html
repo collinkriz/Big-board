@@ -624,7 +624,7 @@ function stateFill(st){
   if(race!=="house"){
     const it=its[0], s=statusOf(it.id).s;
     if(s==="none" && showRtg && it.rating) return RTG_FILL[it.rating];
-    return FILL[s];
+    return FILL[senI("sen",s)];
   }
   let d=0,r=0,open=0; its.forEach(it=>{const s=statusOf(it.id).s; if(s==="D")d++; else if(s==="R")r++; else open++;});
   if(!d&&!r){ if(showRtg){ const t=its.some(i=>i.rating==="T"); return t?RTG_FILL.T:"var(--open)"; } return FILL.none; }
@@ -633,8 +633,9 @@ function stateFill(st){
 /* party that flipped a seat in this state (Senate/governor: the race; House: most flips among its districts) */
 function flipWinner(st){
   const n={}; for(const it of byState(st)){ const s=statusOf(it.id).s; if(["D","R","I"].includes(s)&&it.holder!=="N"&&s!==it.holder) n[s]=(n[s]||0)+1; }
-  const top=Object.entries(n).sort((a,b)=>b[1]-a[1])[0]; return top?top[0]:null;
+  const top=Object.entries(n).sort((a,b)=>b[1]-a[1])[0]; return top?senI(race,top[0]):null;
 }
+const senI=(ch,p)=> ch==="sen"&&p==="I"?"D":p; /* Senate independents caucus with Democrats */
 function stateVisible(st){ return byState(st).some(passes); }
 function paint(){
   for(const st in shapes){
@@ -655,7 +656,7 @@ function paint(){
     c.g.style.display=f?"":"none"; if(!f)continue;
     const cfw=flipWinner(st); c.r.style.fill= cfw?`url(#flip${cfw})`:f; c.r.style.stroke= cfw?"var(--ink)":""; c.g.style.opacity=stateVisible(st)?1:.35;
   }
-  $("lgI").hidden = race!=="sen";
+  $("lgI").hidden = true;
   renderCounts();
   if(mode==="picks"){ renderPicks(); return; }
   renderBoard(); renderRail();
@@ -668,7 +669,7 @@ function renderBoard(){
     n++; const s=statusOf(it.id).s;
     if(s==="D"){d++; if(it.holder==="R")fD++;}
     else if(s==="R"){r++; if(it.holder==="D")fR++;}
-    else if(s==="I"){i++;}
+    else if(s==="I"){ if(race==="sen"){ d++; if(it.holder==="R") fD++; } else i++; }
     else { open++; if(s==="leanD")ld++; if(s==="leanR")lr++; }
   }
   /* In the House, unrated (Solid) seats are pre-counted; a rated seat counts once called. */
@@ -687,7 +688,7 @@ function renderBoard(){
     let ctl="Undecided";
     if(Rr>=51) ctl="GOP control"; else if(Rr===50) ctl="GOP control (VP tiebreak)";
     else if(D>=51) ctl="Dem control"; else if(D+i>=51) ctl="Control rides on independents";
-    html=`<span><b>${ctl}</b></span><span>Dems need <b>51</b> · GOP needs <b>50</b> with VP Vance</span><span>Net: <b>${netTxt}</b></span>`+(i?`<span class="chipI">Independents: ${i}</span>`:"")+`<span>Uncalled: <b>${open}</b> of ${n}</span>`;
+    html=`<span><b>${ctl}</b></span><span>Dems need <b>51</b> · GOP needs <b>50</b> with VP Vance</span><span>Net: <b>${netTxt}</b></span>`+`<span>Uncalled: <b>${open}</b> of ${n}</span>`;
   } else if(race==="house"){
     ml.hidden=false; ml.style.left=(218/435*100)+"%";
     const ctl= D>=218?"Dem majority":Rr>=218?"GOP majority":"Undecided";
@@ -977,7 +978,7 @@ $("lockBtn").onclick=()=>{
 };
 function renderProj(picks,pre,label){
   const pk=picks||{}; let d=RACES.sen.safeD, r=RACES.sen.safeR, i=0, blank=0;
-  for(const id in RACES.sen.items){ const v=pk["sen-"+id]; if(v==="D")d++; else if(v==="R")r++; else if(v==="I")i++; else blank++; }
+  for(const id in RACES.sen.items){ const v=pk["sen-"+id]; if(v==="D"||v==="I")d++; else if(v==="R")r++; else blank++; }
   $(pre+"D").textContent=d; $(pre+"R").textContent=r;
   const w=n=>n+"%"; $(pre+"MD").style.width=w(d); $(pre+"MI").style.width=w(i); $(pre+"MR").style.width=w(r);
   const ctl= r>=51?"Republicans keep control": r===50?"Republicans keep control with VP Vance breaking ties": d>=51?"Democrats flip the Senate": d+i>=51?"Control comes down to the independent":"Control still undecided";
@@ -991,7 +992,7 @@ function miniMap(box,picks,onTap){
   box.textContent="";
   const svg=document.createElementNS(NS,"svg"); svg.setAttribute("viewBox","0 0 1010 593"); svg.setAttribute("class","mm");
   svg.setAttribute("role","img"); svg.setAttribute("aria-label","Senate map of picks");
-  const colour=st=>{ if(!RACES.sen.items[st]) return "var(--off)"; const v=(picks||{})["sen-"+st]; return v?FILL[v]:"var(--open)"; };
+  const colour=st=>{ if(!RACES.sen.items[st]) return "var(--off)"; const v=(picks||{})["sen-"+st]; return v?FILL[senI("sen",v)]:"var(--open)"; };
   const g=el("g",{}), lg=el("g",{}); svg.appendChild(g); svg.appendChild(lg);
   for(const st in shapes){
     const up=!!RACES.sen.items[st];
@@ -1345,12 +1346,12 @@ function renderCalls(){
     const wn=(v.cands||[]).find(c=>c.party===v.winner);
     const b=document.createElement("button"); b.className="cf";
     b.innerHTML=`<span class="tag"></span><span class="wh"><span class="t1"></span><small></small></span><time></time>`;
-    const tg=b.querySelector(".tag"); tg.textContent=ch==="house"?id.replace("-AL",""):st+" "+(ch==="sen"?"SEN":"GOV"); tg.style.background=FILL[v.winner];
-    if(v.winner==="I") tg.style.color="#231500";
+    const tg=b.querySelector(".tag"); tg.textContent=ch==="house"?id.replace("-AL",""):st+" "+(ch==="sen"?"SEN":"GOV"); tg.style.background=FILL[senI(ch,v.winner)];
+    if(senI(ch,v.winner)==="I") tg.style.color="#231500";
     const flip= it&&it.holder!=="N"&&it.holder!==v.winner, isNew= it&&it.holder==="N";
-    if(flip){ flips++; flipNet[v.winner]=(flipNet[v.winner]||0)+1; b.classList.add("isflip"); }
+    if(flip){ flips++; const fp=senI(ch,v.winner); flipNet[fp]=(flipNet[fp]||0)+1; b.classList.add("isflip"); }
     b.querySelector(".t1").textContent=`${wn&&wn.name?wn.name:PARTY_NAME[v.winner]} (${v.winner}) wins ${ch==="house"?NAMES[st]+" "+(id.endsWith("-AL")?"at-large":id.split("-")[1]+(["","st","nd","rd"][+id.split("-")[1]%10]&&![11,12,13].includes(+id.split("-")[1])?["","st","nd","rd"][+id.split("-")[1]%10]:"th"))+" District":NAMES[st]+" "+CH_NAME[ch]}`; { const badge=document.createElement("span"); badge.className="chg "+(flip?"flip":isNew?"newseat":"hold");
-      badge.textContent= flip?`${v.winner} flip from ${it.holder}`: isNew?"New seat":`${v.winner} hold`; if(flip) badge.style.background=FILL[v.winner]; if(flip&&v.winner==="I") badge.style.color="#231500";
+      badge.textContent= flip?`${v.winner} flip from ${it.holder}`: isNew?"New seat":`${v.winner} hold`; if(flip) badge.style.background=FILL[senI(ch,v.winner)]; if(flip&&senI(ch,v.winner)==="I") badge.style.color="#231500";
       b.querySelector(".t1").appendChild(badge); }
     b.querySelector("small").textContent= v.manual?`Marked called by ${(overrides[k]&&overrides[k].by)||"a viewer"}`: v.caller?`Called by ${v.caller}`:"Called";
     const t=Date.parse(v.calledAt); b.querySelector("time").textContent= t?new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"";
