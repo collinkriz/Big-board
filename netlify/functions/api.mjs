@@ -266,7 +266,8 @@ export default async (req) => {
     const overrides = (await store.get("overrides", { type: "json" })) || {};
     if (b.action === "uncall") {
       if (!PARTY.has(b.block)) return json({ error: "bad request" }, 400);
-      overrides[b.key] = { block: b.block, by: str(b.by, 24), at: new Date().toISOString() };
+      const ids = Array.isArray(b.ids) ? b.ids.slice(0, 50).map((x) => str(x, 700)) : [];
+      overrides[b.key] = { block: b.block, ids, by: str(b.by, 24), at: new Date().toISOString() };
     } else if (b.action === "call") {
       if (!PARTY.has(b.winner)) return json({ error: "bad request" }, 400);
       overrides[b.key] = { force: b.winner, by: str(b.by, 24), at: new Date().toISOString() };
