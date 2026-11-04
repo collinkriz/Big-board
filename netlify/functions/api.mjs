@@ -83,11 +83,15 @@ const DEFAULT_HANDLES = [
 ];
 const HANDLE = /^[a-z0-9][a-z0-9.-]{1,252}\.[a-z]{2,}$/i;
 let socialCache = { at: 0, key: "", body: null };
-async function readAuthor(handle) {
+// Accounts whose posts are scanned for race calls (AP plus newsrooms that report the calls).
+const CALL_HANDLES = ["apnews.com", "nbcnews.com", "npr.org", "cbsnews.com", "cnn.com", "nytimes.com", "washingtonpost.com"];
+const CALL_WORDS = /\b(wins?|projected|projects|race call|defeats|reelected|re-elected|holds?)\b/i;
+let callCache = { at: 0, body: null };
+async function readAuthor(handle, limit = 20) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
   try {
-    const u = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=20&actor=" + encodeURIComponent(handle);
+    const u = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=${limit}&actor=" + encodeURIComponent(handle);
     const r = await fetch(u, { signal: ctrl.signal });
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
@@ -149,6 +153,16 @@ export default async (req) => {
     posts.sort((a, b) => b.ts - a.ts);
     socialCache = { at: Date.now(), key, body: { handles, failed, posts: posts.slice(0, 200) } };
     return json(socialCache.body);
+  }
+
+  if (req.method === "GET" && path === "/callposts") {
+    if (callCache.body && Date.now() - callCache.at < 45000) return json(callCache.body);
+    const results = await Promise.allSettled(CALL_HANDLES.map((h) => readAuthor(h, 60)));
+    const posts = [];
+    results.forEach((r) => { if (r.status === "fulfilled") posts.push(...r.value.filter((p) => CALL_WORDS.test(p.text) || (p.link && CALL_WORDS.test(p.link.title || "")))); });
+    posts.sort((a, b) => a.ts - b.ts);
+    callCache = { at: Date.now(), body: { posts, failed: CALL_HANDLES.filter((_, i) => results[i].status !== "fulfilled") } };
+    return json(callCache.body);
   }
 
   if (req.method === "POST" && path === "/social") {
