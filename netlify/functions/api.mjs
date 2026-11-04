@@ -48,6 +48,7 @@ const FEEDS = [
   ["ABC News", "https://abcnews.go.com/abcnews/politicsheadlines"],
   ["Politico", "https://rss.politico.com/politics-news.xml"],
   ["The Hill", "https://thehill.com/homenews/campaign/feed/"],
+  ["NBC News", "https://feeds.nbcnews.com/nbcnews/public/politics"],
 ];
 const decode = (t) =>
   t.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]+>/g, "")
@@ -87,15 +88,15 @@ let socialCache = { at: 0, key: "", body: null };
 const CALL_HANDLES = ["apnews.com", "nbcnews.com", "npr.org", "cbsnews.com", "cnn.com", "nytimes.com", "washingtonpost.com"];
 const CALL_WORDS = /\b(wins?|projected|projects|race call|defeats|reelected|re-elected|holds?)\b/i;
 let callCache = { at: 0, body: null };
-async function readAuthor(handle, limit = 20) {
+async function readAuthor(handle, limit = 20, cursor = null) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
   try {
-    const u = `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=${Math.max(1, Math.min(100, limit))}&actor=${encodeURIComponent(handle)}`;
+    const u = `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=${Math.max(1, Math.min(100, limit))}&actor=${encodeURIComponent(handle)}${cursor ? "&cursor=" + encodeURIComponent(cursor) : ""}`;
     const r = await fetch(u, { signal: ctrl.signal });
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
-    return (j.feed || []).filter((f) => !f.reason && f.post && f.post.record && f.post.record.text != null).map((f) => {
+    const items = (j.feed || []).filter((f) => !f.reason && f.post && f.post.record && f.post.record.text != null).map((f) => {
       const p = f.post, a = p.author || {}, e = p.embed || {};
       const rkey = String(p.uri || "").split("/").pop();
       const ext = e.external || (e.media && e.media.external);
@@ -108,7 +109,17 @@ async function readAuthor(handle, limit = 20) {
         image: imgs[0] ? imgs[0].thumb : "",
       };
     });
+    items.cursor = j.cursor || null;
+    return items;
   } finally { clearTimeout(timer); }
+}
+async function readAuthorPages(handle, pages) {
+  let cursor = null; const out = [];
+  for (let i = 0; i < pages; i++) {
+    const page = await readAuthor(handle, 100, cursor);
+    out.push(...page); cursor = page.cursor; if (!cursor) break;
+  }
+  return out;
 }
 
 export default async (req) => {
@@ -158,16 +169,24 @@ export default async (req) => {
 
   if (req.method === "GET" && path === "/callposts") {
     if (callCache.body && Date.now() - callCache.at < 45000) return json(callCache.body);
+    const archive = (await store.get("callarchive", { type: "json" })) || [];
+    const cold = archive.length === 0; // first run: reach further back to catch calls already scrolled off
     const [results, heads] = await Promise.all([
-      Promise.allSettled(CALL_HANDLES.map((h) => readAuthor(h, 60))),
+      Promise.allSettled(CALL_HANDLES.map((h) => readAuthorPages(h, cold ? 3 : 1))),
       Promise.allSettled(FEEDS.map(readFeed)),
     ]);
     const posts = [];
     results.forEach((r) => { if (r.status === "fulfilled") posts.push(...r.value.filter((p) => CALL_WORDS.test(p.text) || (p.link && CALL_WORDS.test(p.link.title || "")))); });
     // news headlines (RSS) count as call sources too, labelled with the outlet's name
     heads.forEach((r) => { if (r.status === "fulfilled") posts.push(...r.value.filter((x) => CALL_WORDS.test(x.title)).map((x) => ({ handle: "rss", name: x.source, text: x.title, ts: x.ts || Date.now(), url: x.link, link: null }))); });
-    posts.sort((a, b) => a.ts - b.ts);
-    callCache = { at: Date.now(), body: { posts, failed: CALL_HANDLES.filter((_, i) => results[i].status !== "fulfilled") } };
+    // merge into the saved archive so calls are kept after they scroll out of the feeds
+    const seen = new Set(archive.map((p) => p.url + "|" + p.text));
+    let added = 0;
+    for (const p of posts) { const id = p.url + "|" + p.text; if (!seen.has(id)) { seen.add(id); archive.push({ handle: p.handle, name: p.name, text: p.text, ts: p.ts, url: p.url, link: p.link ? { title: p.link.title } : null }); added++; } }
+    const cutoff = Date.now() - 36 * 3600 * 1000;
+    const kept = archive.filter((p) => p.ts >= cutoff).sort((a, b) => a.ts - b.ts).slice(-2000);
+    if (added || kept.length !== archive.length) await store.setJSON("callarchive", kept);
+    callCache = { at: Date.now(), body: { posts: kept, failed: CALL_HANDLES.filter((_, i) => results[i].status !== "fulfilled") } };
     return json(callCache.body);
   }
 
@@ -185,11 +204,14 @@ export default async (req) => {
   // Uncall a wrong automatic call (blocks that winner for that race) or restore it.
   if (req.method === "POST" && path === "/override") {
     const b = await req.json().catch(() => null);
-    if (!b || !RACE_KEY.test(b.key || "") || !["uncall", "restore"].includes(b.action)) return json({ error: "bad request" }, 400);
+    if (!b || !RACE_KEY.test(b.key || "") || !["uncall", "restore", "call"].includes(b.action)) return json({ error: "bad request" }, 400);
     const overrides = (await store.get("overrides", { type: "json" })) || {};
     if (b.action === "uncall") {
       if (!PARTY.has(b.block)) return json({ error: "bad request" }, 400);
       overrides[b.key] = { block: b.block, by: str(b.by, 24), at: new Date().toISOString() };
+    } else if (b.action === "call") {
+      if (!PARTY.has(b.winner)) return json({ error: "bad request" }, 400);
+      overrides[b.key] = { force: b.winner, by: str(b.by, 24), at: new Date().toISOString() };
     } else delete overrides[b.key];
     await store.setJSON("overrides", overrides);
     return json({ ok: true, overrides });
