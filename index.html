@@ -69,6 +69,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 #map path.up{cursor:pointer}
 #map path.up:hover{filter:brightness(1.15)}
 #map path.sel{stroke:var(--ink);stroke-width:2.5}
+#map path.flipped{stroke:var(--ink);stroke-width:2.5}
+.sw.flipsw{background:repeating-linear-gradient(45deg,var(--dem) 0 3px,#ffffffaa 3px 5px);outline:1px solid var(--ink)}
 #map path.faded{opacity:.28}
 #map text{font-family:var(--f-display);font-weight:700;font-size:13px;fill:#fff;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#0008;stroke-width:2.5px}
 #map text.dim{fill:#5b6d8c;stroke:none}
@@ -349,6 +351,7 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
         <span id="lgI"><i class="sw" style="background:var(--ind)"></i>Independent</span>
         <span><i class="sw" style="background:var(--open)"></i>Not called</span>
         <span><i class="sw" style="background:var(--off)"></i>No race</span>
+        <span><i class="sw flipsw"></i>Flipped</span>
       </div>
     </section>
     <aside class="rail" id="rail">
@@ -555,7 +558,16 @@ const svg=$("map"), NS="http://www.w3.org/2000/svg";
 const shapes={}, labels={}, chips={};
 function el(n,a){const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e;}
 function buildMap(){
-  const data=window.__US, root=el("g",{}), labG=el("g",{}); svg.appendChild(root); svg.appendChild(labG);
+  const data=window.__US, root=el("g",{}), labG=el("g",{});
+  /* striped fills mark seats that changed parties */
+  const defs=el("defs",{});
+  for(const [k,col] of [["D","#2f74e8"],["R","#e5453b"],["I","#e9a93a"]]){
+    const pt=el("pattern",{id:"flip"+k,width:9,height:9,patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"});
+    const bg=el("rect",{width:9,height:9}); bg.setAttribute("fill",col);
+    const ln=el("rect",{width:3,height:9}); ln.setAttribute("fill","#ffffff"); ln.setAttribute("fill-opacity",".55");
+    pt.appendChild(bg); pt.appendChild(ln); defs.appendChild(pt);
+  }
+  svg.appendChild(defs); svg.appendChild(root); svg.appendChild(labG);
   if(data && data.paths){
     for(const k in data.paths){ const st=k.toUpperCase(); if(!NAMES[st])continue;
       const p=el("path",{d:data.paths[k].path,class:"st","data-st":st}); root.appendChild(p); shapes[st]=p; }
@@ -589,11 +601,18 @@ function stateFill(st){
   if(!d&&!r){ if(showRtg){ const t=its.some(i=>i.rating==="T"); return t?RTG_FILL.T:"var(--open)"; } return FILL.none; }
   if(d>r) return open?FILL.leanD:FILL.D; if(r>d) return open?FILL.leanR:FILL.R; return FILL.toss;
 }
+/* party that flipped a seat in this state (Senate/governor: the race; House: most flips among its districts) */
+function flipWinner(st){
+  const n={}; for(const it of byState(st)){ const s=statusOf(it.id).s; if(["D","R","I"].includes(s)&&it.holder!=="N"&&s!==it.holder) n[s]=(n[s]||0)+1; }
+  const top=Object.entries(n).sort((a,b)=>b[1]-a[1])[0]; return top?top[0]:null;
+}
 function stateVisible(st){ return byState(st).some(passes); }
 function paint(){
   for(const st in shapes){
     const p=shapes[st], f=stateFill(st), up=!!f, vis=up&&stateVisible(st);
-    p.style.fill= up?f:"var(--off)";
+    const fw= up?flipWinner(st):null;
+    p.style.fill= fw?`url(#flip${fw})`: up?f:"var(--off)";
+    p.classList.toggle("flipped",!!fw);
     p.classList.toggle("up",up); p.classList.toggle("faded",up&&!vis);
     p.classList.toggle("sel",st===(stFilter||(sel&&RACES[race].items[sel]&&RACES[race].items[sel].st)));
     if(labels[st]){
@@ -605,7 +624,7 @@ function paint(){
   for(const st of SMALL){
     const c=chips[st], f=stateFill(st);
     c.g.style.display=f?"":"none"; if(!f)continue;
-    c.r.style.fill=f; c.g.style.opacity=stateVisible(st)?1:.35;
+    const cfw=flipWinner(st); c.r.style.fill= cfw?`url(#flip${cfw})`:f; c.r.style.stroke= cfw?"var(--ink)":""; c.g.style.opacity=stateVisible(st)?1:.35;
   }
   $("lgI").hidden = race!=="sen";
   renderCounts();
@@ -1164,7 +1183,7 @@ function renderDistricts(){
     let fill="var(--off)", fg="var(--ink)", line2="Solid seat";
     if(it){
       const s=statusOf(id).s;
-      if(["D","R"].includes(s)){ fill=FILL[s]; fg="#fff"; line2=(s==="D"?"Dem":"GOP")+" win ✓"; }
+      if(["D","R"].includes(s)){ const fl=it.holder!=="N"&&s!==it.holder; fill= fl?`repeating-linear-gradient(45deg,${FILL[s]} 0 9px,#ffffff70 9px 12px)`:FILL[s]; fg="#fff"; line2=(s==="D"?"Dem":"GOP")+(fl?" FLIP ✓":" win ✓"); if(fl) t.style.outline="2px solid var(--ink)"; }
       else { open++; fill= it.rating==="T"?RTG_FILL.T: (it.rating==="LD"||it.rating==="KD")?"var(--dem-lean)":"var(--rep-lean)"; line2=RTG_LABEL[it.rating]+(s!=="none"?" · "+STATUS_LABEL[s]:""); }
       t.onclick=()=>openSheet(id);
     } else { t.classList.add("solid"); t.disabled=true; }
