@@ -204,6 +204,16 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .pbn{flex:1;min-width:0}
 .pbn b{font-size:15px}
 .pbn small{display:block;color:var(--muted);font-size:12px}
+.ptv{font-family:var(--f-num);font-weight:700;font-size:14px;min-width:34px;text-align:right;color:var(--muted)}
+.ptv.got{color:#3ddc84}
+.sheet>*{flex-shrink:0}
+.ptsbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ptsbox table{width:100%;border-collapse:collapse;font-size:14px}
+.ptsbox td{padding:7px 12px;border-bottom:1px solid var(--line)}
+.ptsbox td:nth-child(2){text-align:right;color:var(--muted);font-family:var(--f-num)}
+.ptsbox td:last-child{text-align:right;font-family:var(--f-num);font-weight:700;width:70px}
+.ptsbox tr.tot td{font-weight:700;font-size:16px;border-bottom:0;background:var(--panel-2)}
+.ptsbox p{margin:0;padding:8px 12px;font-size:12px;color:var(--muted)}
 .callfeed{gap:8px;padding:12px 14px}
 .callfeed h2 span{font-family:var(--f-num);font-size:12px;letter-spacing:0;margin-left:6px}
 .cflist{display:flex;flex-direction:column;gap:6px;max-height:228px;overflow-y:auto}
@@ -432,6 +442,7 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     <div class="pside-r"><span class="lab">GOP</span><span class="big pr" id="pbR"></span></div>
     <div class="verdict" id="pbText"></div>
   </div>
+  <div class="ptsbox" id="pbPts"></div>
   <div class="minimap" id="pbMap"></div>
   <div class="pblist" id="pbList"></div>
 </div>
@@ -856,6 +867,7 @@ function renderPicks(){
     rows.forEach((r,i)=>{ if(guesses[i]===best){ r.bonus[ch]=SEAT_BONUS[ch]; r.s.pts+=SEAT_BONUS[ch]; } });
   }
   rows.sort((a,b)=>(b.s.pts-a.s.pts)||(b.s.toss-a.s.toss)||(b.s.hit-a.s.hit));
+  lastBonus={}; lastFinals=finals; rows.forEach(r=>lastBonus[r.id]=r.bonus);
   const lb=$("lb"); lb.textContent="";
   if(!rows.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No one has made picks yet. Make yours below; your friend's appear here as they pick."; lb.appendChild(e); }
   rows.forEach((r,i)=>{
@@ -978,6 +990,12 @@ function cyclePick(st){
   const next=order[(order.indexOf(cur)+1)%order.length];
   if(!p.picks) p.picks={}; if(next) p.picks[k]=next; else delete p.picks[k]; commitMe();
 }
+/* points one pick has earned: null = not decided yet */
+function ptsFor(it,pick,res){
+  if(!res||!pick) return null; if(pick!==res) return 0;
+  if(it.rating==="T") return 2; const f=favOf(it); return f&&res!==f?upsetPts(it):1;
+}
+let lastBonus={}, lastFinals={};
 /* another player's full board, visible once you've submitted */
 let pbOpen=null;
 function openPlayer(id){
@@ -987,16 +1005,30 @@ function openPlayer(id){
   const sc=scoreOf(pl), tb=pl.tb||{};
   $("pbSub").textContent=(pl.locked?"Submitted":"Still picking")+` · ${sc.pts} pts from races · Senate guess ${tb.sen||"–"} · House guess ${tb.house||"–"}`;
   renderProj(pl.picks,"pb",`${first}'s map`);
+  /* how the points add up */
+  { const g={fav:[0,0],toss:[0,0],up:[0,0],miss:0,pend:0};
+    for(const it of Object.values(RACES.sen.items)){ const k="sen-"+it.id, v=(pl.picks||{})[k]; if(!v) continue; const r=resultFor(k), pt=ptsFor(it,v,r);
+      if(pt==null){ g.pend++; continue; } if(pt===0){ g.miss++; continue; }
+      const cat= it.rating==="T"?"toss": (favOf(it)&&r!==favOf(it))?"up":"fav"; g[cat][0]++; g[cat][1]+=pt; }
+    const b=lastBonus[id]||{}; const total=g.fav[1]+g.toss[1]+g.up[1]+(b.sen||0)+(b.house||0);
+    const rowsH=[["Favorites called right",g.fav[0],g.fav[1]],["Toss-ups called right",g.toss[0],g.toss[1]],["Upsets called right",g.up[0],g.up[1]]]
+      .map(([l,n,pt])=>`<tr><td>${l}</td><td>${n}</td><td>${pt?"+"+pt:"0"}</td></tr>`).join("")
+      +`<tr><td>Missed</td><td>${g.miss}</td><td>0</td></tr>`
+      +["sen","house"].map(ch=>{ const lab=ch==="sen"?"Senate seat guess":"House seat guess"; const v=b[ch]; const st= v?`+${v}`: lastFinals[ch]==null?"pending":"0";
+        return `<tr><td>${lab} (${(tb[ch]||"none").toString().replace(/[<>&]/g,"")})</td><td></td><td>${st}</td></tr>`; }).join("")
+      +`<tr class="tot"><td>Total</td><td></td><td>${total}</td></tr>`;
+    $("pbPts").innerHTML=`<table>${rowsH}</table><p>${g.pend} pick${g.pend===1?"":"s"} still waiting on results.</p>`; }
   miniMap($("pbMap"),pl.picks,null);
   const list=$("pbList"); list.textContent="";
   const its=Object.values(RACES.sen.items).sort((a,b)=>((RORDER[a.rating]??3)-(RORDER[b.rating]??3))||NAMES[a.st].localeCompare(NAMES[b.st]));
   for(const it of its){
     const k="sen-"+it.id, v=(pl.picks||{})[k], r=resultFor(k), f=favOf(it);
     const row=document.createElement("div"); row.className="pbrow";
-    row.innerHTML=`<span class="pbn"><b></b><small></small></span><span class="pill"></span>`;
+    row.innerHTML=`<span class="pbn"><b></b><small></small></span><span class="pill"></span><span class="ptv"></span>`;
     row.querySelector("b").textContent=NAMES[it.st];
     row.querySelector("small").textContent=[it.rating?RTG_LABEL[it.rating]:"Solid "+it.holder, v&&f&&v!==f?"upset pick":null, r?`Result: ${r}`:null].filter(Boolean).join(" · ");
     const pill=row.querySelector(".pill"); pill.className="pill p-"+(v||"none"); pill.textContent=(v?{D:"Dem",R:"GOP",I:"Ind"}[v]:"No pick")+(r&&v?(v===r?" ✓":" ✗"):"");
+    { const pt=ptsFor(it,v,r), el2=row.querySelector(".ptv"); el2.textContent= pt==null?"–":pt?`+${pt}`:"0"; el2.classList.toggle("got",!!pt); }
     list.appendChild(row);
   }
   $("pbSheet").hidden=false; scrim.hidden=false;
