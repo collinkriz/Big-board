@@ -216,7 +216,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .ptsbox p{margin:0;padding:8px 12px;font-size:12px;color:var(--muted)}
 .callfeed{gap:8px;padding:12px 14px}
 .callfeed h2 span{font-family:var(--f-num);font-size:12px;letter-spacing:0;margin-left:6px}
-.cflist{display:flex;flex-direction:column;gap:6px;max-height:228px;overflow-y:auto}
+.cflist{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto}
 .cf{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;align-items:center;text-align:left;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);padding:8px 10px;min-height:52px}
 .cf .tag{font-family:var(--f-display);font-weight:800;font-size:15px;letter-spacing:.04em;padding:6px 8px;border-radius:6px;color:#fff;white-space:nowrap}
 .cf .wh{min-width:0;font-weight:600;font-size:15px}
@@ -228,6 +228,18 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .chg.newseat{background:transparent;border:1px dashed var(--line);color:var(--muted)}
 .cf.isflip{border-color:var(--ink)}
 .cfflips{font-family:var(--f-display);font-weight:800;letter-spacing:.08em;margin-left:8px;color:var(--ink)}
+.cfwrap{display:flex;flex-direction:column}
+.cfsrc .uncall{margin:4px 0 6px 10px;color:#ffb4ae;min-height:40px;padding:8px 12px}
+.uncalled{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.ucrow{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.ucrow .tbtn{min-height:36px;padding:6px 12px}
+.cfwrap .cf{width:100%}
+.cfsrc{margin:2px 4px 2px 10px;font-size:12px;color:var(--muted)}
+.cfsrc summary{cursor:pointer;padding:6px 2px;min-height:20px;color:#8fb6ff;width:max-content}
+.srcq{border-left:3px solid var(--line);padding:6px 10px;margin:4px 0 6px}
+.srch{font-weight:600;color:var(--ink)}
+.srct{margin:3px 0;color:var(--ink);line-height:1.4;overflow-wrap:anywhere}
+.srcq a{color:#8fb6ff}
 .cf time{font-family:var(--f-num);font-size:12px;color:var(--muted);white-space:nowrap}
 .rules{border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
 .rules summary{cursor:pointer;padding:12px 14px;font-weight:600;min-height:24px;list-style:none;display:flex;align-items:center;gap:8px}
@@ -1059,12 +1071,13 @@ function setLiveText(t,on){ liveText.textContent=t; liveDot.classList.toggle("on
 let firstPull=true;
 
 /* ---------- automatic race calls from decision-desk posts on Bluesky ---------- */
-let adminCalls={}, autoCalls={}, autoConflicts=[];
+let adminCalls={}, autoCalls={}, autoConflicts=[], overrides={};
+const blocked=k=> overrides[k]&&autoCalls[k]&&autoCalls[k].winner===overrides[k].block;
 function rebuildLive(){
   for(const k in live) delete live[k];
-  for(const k in autoCalls) live[k]=autoCalls[k];
+  for(const k in autoCalls) if(!blocked(k)) live[k]=autoCalls[k];
   for(const k in adminCalls){ const a=adminCalls[k], au=autoCalls[k];
-    live[k]= a&&a.winner ? a : au ? Object.assign({},a,au) : a; }
+    live[k]= a&&a.winner ? a : (au&&!blocked(k)) ? Object.assign({},a,au) : a; }
 }
 const STATE_LIST=Object.entries(NAMES).filter(([c])=>c!=="DC").sort((a,b)=>b[1].length-a[1].length);
 const WIN_RE=/\b(wins?|will win|projected to win|projected winner|defeats|reelected|re-elected|holds?|victory|victorious)\b/i;
@@ -1128,9 +1141,16 @@ function buildAutoCalls(posts){
     const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP"));
     const nm=arr.find(x=>x.c.name); 
     out[k]={winner:winners[0],caller:callers.slice(0,3).join(", ")+` (via ${viaOf(arr)})`,calledAt:new Date(arr[0].p.ts).toISOString(),url:arr[0].p.url,auto:true,
+      sources:arr.map(x=>({by:callerName(x.p),where:x.p.handle==="rss"?"headline":"Bluesky",text:x.p.text.slice(0,300),url:x.p.url,ts:x.p.ts})),
       cands: nm?[{name:nm.c.name,party:winners[0],pct:null}]:[]};
   }
   return out;
+}
+async function setOverride(k,action,block){
+  try{ const r=await fetch("/api/override",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:k,action,block,by:(myDraft&&myDraft.name)||""})});
+    if(!r.ok) throw new Error(r.status); const j=await r.json(); overrides=j.overrides||{}; rebuildLive(); paint();
+    $("cfStatus").textContent= action==="uncall"?"Call removed for everyone. If outlets call it the other way, that call will still come through.":"Call restored."; }
+  catch(e){ $("cfStatus").textContent="Couldn't change that call. Check your connection and try again."; }
 }
 async function pullCalls(){
   try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error("server "+r.status);
@@ -1144,7 +1164,7 @@ async function pull(){
   try{
     const r=await fetch("/api/state",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
     const j=await r.json();
-    adminCalls=j.calls||{}; rebuildLive();
+    adminCalls=j.calls||{}; overrides=j.overrides||{}; rebuildLive();
     const next=j.picks||{};
     if(firstPull && next[meId] && !Object.keys(myDraft.picks||{}).length && !myDraft.name){ myDraft=JSON.parse(JSON.stringify(next[meId])); save("bb26-mydraft",myDraft); }
     firstPull=false; next[meId]=myDraft; players=next;
@@ -1229,13 +1249,14 @@ function renderDistricts(){
   $("dSub").textContent=`${n} district${n>1?"s":""} · ${rated.length} competitive · ${open} still open`;
 }
 $("dBack").onclick=()=>{ $("dview").hidden=true; stFilter=null; dState=null; paint(); };
+const openSrc=new Set();
 const CH_NAME={sen:"Senate",house:"House",gov:"Governor"}, PARTY_NAME={D:"Democrat",R:"Republican",I:"Independent"};
 function renderCalls(){
   const list=$("cfList"); if(!list) return; list.textContent="";
   const calls=Object.entries(live).filter(([,v])=>v&&v.winner).sort((a,b)=>(Date.parse(b[1].calledAt)||0)-(Date.parse(a[1].calledAt)||0));
   $("cfCount").textContent=calls.length?String(calls.length):"";
   let flips=0; const flipNet={};
-  if(!calls.length){ const e=document.createElement("div"); e.className="empty"; e.style.padding="4px 2px"; e.textContent="No races called yet. Calls from the decision desks show up here as soon as they're published."; list.appendChild(e); return; }
+  if(!calls.length){ const e=document.createElement("div"); e.className="empty"; e.style.padding="4px 2px"; e.textContent="No races called yet. Calls from the decision desks show up here as soon as they're published."; list.appendChild(e); }
   for(const [k,v] of calls){
     const i=k.indexOf("-"), ch=k.slice(0,i), id=k.slice(i+1), it=RACES[ch]&&RACES[ch].items[id], st=id.split("-")[0];
     const wn=(v.cands||[]).find(c=>c.party===v.winner);
@@ -1251,8 +1272,37 @@ function renderCalls(){
     b.querySelector("small").textContent= v.caller?`Called by ${v.caller}`:"Called";
     const t=Date.parse(v.calledAt); b.querySelector("time").textContent= t?new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"";
     b.onclick=()=>{ if(mode!=="board") setMode("board"); if(race!==ch) setRace(ch); if(it) openSheet(id); };
-    list.appendChild(b);
+    const wrap=document.createElement("div"); wrap.className="cfwrap"; wrap.appendChild(b);
+    const src=document.createElement("details"); src.className="cfsrc";
+    if(openSrc.has(k)) src.open=true;
+    src.addEventListener("toggle",()=>{ if(src.open) openSrc.add(k); else openSrc.delete(k); });
+    const sm=document.createElement("summary"); const n=(v.sources||[]).length;
+    sm.textContent= n?`Show source${n>1?"s":""} (${n})`:"Source";
+    src.appendChild(sm);
+    if(n){ for(const x of v.sources){ const q=document.createElement("div"); q.className="srcq";
+        const hd=document.createElement("div"); hd.className="srch"; hd.textContent=`${x.by} · ${x.where} · ${x.ts?new Date(x.ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):""}`;
+        const tx=document.createElement("div"); tx.className="srct"; tx.textContent=`“${x.text}”`;
+        const a=document.createElement("a"); a.href=x.url; a.target="_blank"; a.rel="noopener"; a.textContent="Open original ↗";
+        q.appendChild(hd); q.appendChild(tx); if(x.url) q.appendChild(a); src.appendChild(q); } }
+    else { const q=document.createElement("div"); q.className="srcq"; q.textContent= v.caller?`Called by ${v.caller}. No source post attached.`:"No source post attached."; src.appendChild(q); }
+    if(v.auto){ const ub=document.createElement("button"); ub.className="tbtn uncall"; ub.textContent="Uncall this race";
+      ub.onclick=(e)=>{ e.stopPropagation();
+        if(ub.dataset.armed){ setOverride(k,"uncall",v.winner); return; }
+        ub.dataset.armed="1"; ub.textContent=`Tap again: remove this ${v.winner} call for everyone`; setTimeout(()=>{ delete ub.dataset.armed; ub.textContent="Uncall this race"; },4000); };
+      src.appendChild(ub); }
+    wrap.appendChild(src);
+    list.appendChild(wrap);
   }
+  /* races someone uncalled, with a way to restore them */
+  const ov=Object.entries(overrides).filter(([k])=>blocked(k));
+  if(ov.length){ const box=document.createElement("div"); box.className="uncalled";
+    const t=document.createElement("div"); t.className="srch"; t.textContent="Uncalled"; box.appendChild(t);
+    for(const [k,o] of ov){ const i=k.indexOf("-"), ch=k.slice(0,i), id=k.slice(i+1), st=id.split("-")[0];
+      const r=document.createElement("div"); r.className="ucrow";
+      const tx=document.createElement("span"); tx.textContent=`${ch==="house"?id:NAMES[st]+" "+CH_NAME[ch]}: ${PARTY_NAME[o.block]} call removed${o.by?" by "+o.by:""}`;
+      const rb=document.createElement("button"); rb.className="tbtn"; rb.textContent="Restore"; rb.onclick=()=>setOverride(k,"restore");
+      r.appendChild(tx); r.appendChild(rb); box.appendChild(r); }
+    list.appendChild(box); }
   const h=document.querySelector(".callfeed h2"); let fl=$("cfFlips");
   if(!fl){ fl=document.createElement("span"); fl.id="cfFlips"; fl.className="cfflips"; h.appendChild(fl); }
   fl.textContent= flips?`· ${flips} flip${flips>1?"s":""}`+Object.entries(flipNet).map(([p,n])=>` (${p} +${n})`).join(""):"";
