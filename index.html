@@ -1106,7 +1106,14 @@ function parseCall(post){
   const t=(post.text+" "+(post.link&&post.link.title||"")).replace(/\s+/g," ");
   if(SKIP_RE.test(t)||NOT_CALL_RE.test(t)||NOT_RACE_AFTER_WIN.test(t)||!CALL_FORM_RE.test(t)) return null;
   const w=WIN_RE.exec(t); if(!w) return null;
-  const st=findState(t); if(!st) return null;
+  let st=findState(t);
+  if(!st){ /* no state named: identify the race by a candidate's surname, if it matches exactly one Senate/governor race */
+    const found=new Set();
+    for(const ch of ["sen","gov"]) for(const id in RACES[ch].items) for(const c of candsOf(RACES[ch].items[id].note)){
+      const m=new RegExp("\\b"+c.last.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b").exec(t);
+      if(m&&m.index<w.index) found.add(id); }
+    if(found.size!==1) return null; st=[...found][0];
+  }
   /* 1) match a named candidate in this state's Senate or governor race, closest before the win word */
   let hit=null;
   for(const ch of ["sen","gov"]){ const it=RACES[ch].items[st]; if(!it) continue;
