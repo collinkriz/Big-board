@@ -1071,7 +1071,7 @@ function setLiveText(t,on){ liveText.textContent=t; liveDot.classList.toggle("on
 let firstPull=true;
 
 /* ---------- automatic race calls from decision-desk posts on Bluesky ---------- */
-let adminCalls={}, autoCalls={}, autoConflicts=[], overrides={};
+let adminCalls={}, autoCalls={}, autoConflicts=[], overrides={}, pendingConfirm=[];
 const blocked=k=> overrides[k]&&autoCalls[k]&&autoCalls[k].winner===overrides[k].block;
 function rebuildLive(){
   for(const k in live) delete live[k];
@@ -1080,7 +1080,14 @@ function rebuildLive(){
     live[k]= a&&a.winner ? a : (au&&!blocked(k)) ? Object.assign({},a,au) : a; }
 }
 const STATE_LIST=Object.entries(NAMES).filter(([c])=>c!=="DC").sort((a,b)=>b[1].length-a[1].length);
-const WIN_RE=/\b(wins?|will win|projected to win|projected winner|defeats|reelected|re-elected|holds?|victory|victorious)\b/i;
+const WIN_RE=/\b(wins?|will win|projected to win|projected winner|defeats|reelected|re-elected)\b/i;
+/* posts about leads, partial counts, sub-races or self-declared wins are never calls */
+const NOT_CALL_RE=/\b(leads?|leading|ahead|edges?|early (vote|votes|returns|results)|partial|county|counties|precincts?|counted|vote count|too (close|early)|not yet|tightens|tight race|declares? victory|claims? victory|says (he|she) (won|will win)|expected to|eyes|on track|poised|path to|endorse(s|d|ment)?|debate|nomination|exit polls?|projection model|forecast)\b/i;
+const NOT_RACE_AFTER_WIN=/\b(wins?|will win)\s+(the\s+)?(\w+\s+){0,2}(county|counties|vote in|early|primary|endorsement|support|debate|nomination|precinct)/i;
+/* a post must read like a call: decision-desk wording, or "X wins/defeats ... <office or reelection>" */
+/* explicit decision-desk language: enough on its own from any of our outlets */
+const STRONG_RE=/\b(projects?|projected|race call|aprace ?call|calls? the race|declared the winner|wins? (re-?election|election)|wins? the [\w.' -]{0,30}(senate|governor'?s?|gubernatorial|house) (race|seat|contest))\b/i;
+const CALL_FORM_RE=/\b(projects?|projected|race call|aprace ?call|calls? the race|declared the winner)\b|\bwins? (re-?election|election)\b|\b(wins?|defeats?)\b[^.]{0,80}\b(senate|governor|gubernatorial|house|congressional|district|seat|race)\b/i;
 const SKIP_RE=/\?|\bprimar(y|ies)\b|\bcould\b|\bwould\b|\bmight\b|\bpolls?\b|\bpolling\b|\bodds\b|\bchances?\b|\bhow\b|\bwhy\b|\bwho will\b|\brunoff\b|\bif\b|\bpredict/i;
 function findState(t){
   let best=null;
@@ -1097,7 +1104,7 @@ function partyBefore(t,end){ const seg=t.slice(0,end).toLowerCase(); let best=nu
   return best&&best.p; }
 function parseCall(post){
   const t=(post.text+" "+(post.link&&post.link.title||"")).replace(/\s+/g," ");
-  if(SKIP_RE.test(t)) return null;
+  if(SKIP_RE.test(t)||NOT_CALL_RE.test(t)||NOT_RACE_AFTER_WIN.test(t)||!CALL_FORM_RE.test(t)) return null;
   const w=WIN_RE.exec(t); if(!w) return null;
   const st=findState(t); if(!st) return null;
   /* 1) match a named candidate in this state's Senate or governor race, closest before the win word */
@@ -1128,7 +1135,7 @@ const viaOf=arr=> arr.some(x=>x.p.handle!=="rss")&&arr.some(x=>x.p.handle==="rss
 function buildAutoCalls(posts){
   const by={};
   for(const p of posts){ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
-  const out={}; autoConflicts=[];
+  const out={}; autoConflicts=[]; pendingConfirm=[];
   for(const k in by){ const arr=by[k]; const winners=[...new Set(arr.map(x=>x.c.winner))];
     if(winners.length>1){
       const votes={}; for(const x of arr){ (votes[x.c.winner]=votes[x.c.winner]||new Set()).add(callerName(x.p)); }
@@ -1138,6 +1145,11 @@ function buildAutoCalls(posts){
       winners.length=0; winners.push(keep);
     }
     arr.sort((a,b)=>a.p.ts-b.p.ts);
+    { const i=k.indexOf("-"), it=RACES[k.slice(0,i)]&&RACES[k.slice(0,i)].items[k.slice(i+1)];
+      const close= it&&(["T","LD","LR"].includes(it.rating) || (it.holder!=="N"&&it.holder!==winners[0]));
+      const outlets=new Set(arr.map(x=>callerName(x.p)));
+      const strong=arr.some(x=>STRONG_RE.test(x.p.text));
+      if(close&&!strong&&!outlets.has("AP")&&outlets.size<2){ pendingConfirm.push(k); continue; } }
     const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP"));
     const nm=arr.find(x=>x.c.name); 
     out[k]={winner:winners[0],caller:callers.slice(0,3).join(", ")+` (via ${viaOf(arr)})`,calledAt:new Date(arr[0].p.ts).toISOString(),url:arr[0].p.url,auto:true,
@@ -1156,7 +1168,7 @@ async function pullCalls(){
   try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error("server "+r.status);
     const j=await r.json(); const posts=j.posts||[]; autoCalls=buildAutoCalls(posts); rebuildLive();
     const n=Object.keys(autoCalls).length, bad=j.failed||[];
-    $("cfStatus").textContent=`Scanned ${posts.length} possible call posts · ${n} race${n===1?"":"s"} called · checked ${stamp()}`+(autoConflicts.length?` · holding ${autoConflicts.join(", ")} (sources disagree)`:"")+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
+    $("cfStatus").textContent=`Scanned ${posts.length} possible call posts · ${n} race${n===1?"":"s"} called · checked ${stamp()}`+(autoConflicts.length?` · holding ${autoConflicts.join(", ")} (sources disagree)`:"")+(pendingConfirm.length?` · waiting for a 2nd source on ${pendingConfirm.join(", ")}`:"")+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
     paint(); }
   catch(e){ $("cfStatus").textContent=`Couldn't reach the call sources (${e.message||"network error"}) · retrying every 30 seconds`; }
 }
