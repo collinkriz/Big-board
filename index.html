@@ -1120,8 +1120,30 @@ function candsOf(note){ const out=[]; const re=/([A-Z][\w'â€™.-]+(?: [A-Z][\w'â€
 function partyBefore(t,end){ const seg=t.slice(0,end).toLowerCase(); let best=null;
   for(const [w,p] of [["democrat","D"],["republican","R"],["gop","R"],["independent","I"]]){ const i=seg.lastIndexOf(w); if(i>=0&&(!best||i>best.i)) best={i,p}; }
   return best&&best.p; }
+/* "X concedes (to Y)": the conceding candidate's opponent won. Ignores refusals and "hasn't conceded". */
+const CONCEDE_RE=/\bconced(e|es|ed|ing)\b/i;
+const NO_CONCEDE_RE=/\b(won'?t|will not|refuses? to|refused to|not|yet to|hasn'?t|has not|declines? to|no plans? to|without)\b[^.]{0,20}\bconced/i;
+function parseConcession(t){
+  if(!CONCEDE_RE.test(t)||NO_CONCEDE_RE.test(t)||HARD_NOT_RE.test(t)) return null;
+  const cm=CONCEDE_RE.exec(t);
+  let st=findState(t);
+  const states= st?[st]:Object.keys(NAMES);
+  /* score each race by how many of its candidates are named; the conceder is the one named closest before "concede" */
+  const cand=[];
+  for(const s2 of states) for(const ch of ["sen","gov"]){ if(!RACES[ch].items[s2]) continue;
+    const cs=candsFor(ch,s2); if(cs.length<2) continue; let n=0, conceder=null;
+    for(const c of cs){ const m=new RegExp("\\b"+c.last.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i").exec(t); if(!m) continue; n++;
+      if(m.index<cm.index&&(!conceder||m.index>conceder.i)) conceder={i:m.index,c}; }
+    if(conceder){ const opp=cs.filter(o=>o.party!==conceder.c.party); if(opp.length===1) cand.push({n,key:ch+"-"+s2,winner:opp[0].party,name:opp[0].last}); } }
+  if(!cand.length) return null;
+  cand.sort((a,b)=>b.n-a.n);
+  if(cand.length>1&&cand[1].n===cand[0].n) return null; /* can't tell which race */
+  const hit=cand[0];
+  return {key:hit.key,winner:hit.winner,name:hit.name,concession:true};
+}
 function parseCall(post){
   const t=(post.text+" "+(post.link&&post.link.title||"")).replace(/\s+/g," ");
+  { const cc=parseConcession(t); if(cc) return cc; }
   if(HARD_NOT_RE.test(t)||NOT_RACE_AFTER_WIN.test(t)) return null;
   const w=WIN_RE.exec(t); if(!w) return null;
   const strong=STRONG_RE.test(t);
@@ -1179,7 +1201,7 @@ function buildAutoCalls(posts){
     { const i=k.indexOf("-"), it=RACES[k.slice(0,i)]&&RACES[k.slice(0,i)].items[k.slice(i+1)];
       const close= it&&(["T","LD","LR"].includes(it.rating) || (it.holder!=="N"&&it.holder!==winners[0]));
       const outlets=new Set(arr.map(x=>callerName(x.p)));
-      const strong=arr.some(x=>x.p.handle==="wiki"||STRONG_RE.test(x.p.text));
+      const strong=arr.some(x=>x.p.handle==="wiki"||x.c.concession||STRONG_RE.test(x.p.text));
       if(close&&!strong&&!outlets.has("AP")&&outlets.size<2){ pendingConfirm.push(k); continue; } }
     const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP")); if(callers.length>1) callers.sort((a,b)=>(a==="Wikipedia")-(b==="Wikipedia"));
     const nm=arr.find(x=>x.c.name); 
