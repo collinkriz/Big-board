@@ -86,7 +86,7 @@ const HANDLE = /^[a-z0-9][a-z0-9.-]{1,252}\.[a-z]{2,}$/i;
 let socialCache = { at: 0, key: "", body: null };
 // Accounts whose posts are scanned for race calls (AP plus newsrooms that report the calls).
 const CALL_HANDLES = ["apnews.com", "nbcnews.com", "npr.org", "cbsnews.com", "cnn.com", "nytimes.com", "washingtonpost.com"];
-const CALL_WORDS = /\b(wins?|projected|projects|race call|defeats|reelected|re-elected|holds?)\b/i;
+const CALL_WORDS = /\b(wins?|won|projected|projects|race call|defeats|reelected|re-elected|holds?|keeps|retains|elected)\b/i;
 let callCache = { at: 0, body: null };
 async function readAuthor(handle, limit = 20, cursor = null) {
   const ctrl = new AbortController();
@@ -169,7 +169,7 @@ export default async (req) => {
 
   if (req.method === "GET" && path === "/callposts") {
     if (callCache.body && Date.now() - callCache.at < 45000) return json(callCache.body);
-    const archive = (await store.get("callarchive", { type: "json" })) || [];
+    const archive = (await store.get("callarchive2", { type: "json" })) || [];
     const cold = archive.length === 0; // first run: reach further back to catch calls already scrolled off
     const [results, heads] = await Promise.all([
       Promise.allSettled(CALL_HANDLES.map((h) => readAuthorPages(h, cold ? 3 : 1))),
@@ -185,7 +185,7 @@ export default async (req) => {
     for (const p of posts) { const id = p.url + "|" + p.text; if (!seen.has(id)) { seen.add(id); archive.push({ handle: p.handle, name: p.name, text: p.text, ts: p.ts, url: p.url, link: p.link ? { title: p.link.title } : null }); added++; } }
     const cutoff = Date.now() - 36 * 3600 * 1000;
     const kept = archive.filter((p) => p.ts >= cutoff).sort((a, b) => a.ts - b.ts).slice(-2000);
-    if (added || kept.length !== archive.length) await store.setJSON("callarchive", kept);
+    if (added || kept.length !== archive.length) await store.setJSON("callarchive2", kept);
     callCache = { at: Date.now(), body: { posts: kept, failed: CALL_HANDLES.filter((_, i) => results[i].status !== "fulfilled") } };
     return json(callCache.body);
   }
