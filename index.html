@@ -1092,9 +1092,11 @@ function rebuildLive(){
     live[k]={winner:o.force,caller:`marked by ${o.by||"a viewer"}`,calledAt:o.at,manual:true,cands:[]}; }
 }
 const STATE_LIST=Object.entries(NAMES).filter(([c])=>c!=="DC").sort((a,b)=>b[1].length-a[1].length);
-const WIN_RE=/\b(wins?|will win|projected to win|projected winner|defeats|reelected|re-elected)\b/i;
-/* posts about leads, partial counts, sub-races or self-declared wins are never calls */
-const NOT_CALL_RE=/\b(leads?|leading|ahead|edges?|early (vote|votes|returns|results)|partial|county|counties|precincts?|counted|vote count|too (close|early)|not yet|tightens|tight race|declares? victory|claims? victory|says (he|she) (won|will win)|expected to|eyes|on track|poised|path to|endorse(s|d|ment)?|debate|nomination|exit polls?|projection model|forecast)\b/i;
+const WIN_RE=/\b(wins?|won|will win|projected to win|projected winner|defeats|reelected|re-elected|keeps|retains|is elected|elected to|holds? (on to )?(her |his |the |a )?([\w-]+ ){0,2}seat)\b/i;
+/* never a call */
+const HARD_NOT_RE=/\?|\bprimar(y|ies)\b|\brunoff\b|\btoo (close|early)\b|\bnot yet\b|\bdeclares? victory\b|\bclaims? victory\b|\bsays (he|she) (won|will win)\b|\bwho will\b|\bpredict/i;
+/* signs of a non-call; ignored when the post also has clear call language */
+const SOFT_NOT_RE=/\b(leads?|leading|ahead|edges?|early (vote|votes|returns|results)|partial|counted|vote count|tightens|tight race|expected to|eyes|on track|poised|path to|endorse(s|d|ment)?|debate|nomination|exit polls?|projection model|forecast|polls?|polling|could|would|might|if|how|why|odds|chances?|county|counties|precincts?)\b/i;
 const NOT_RACE_AFTER_WIN=/\b(wins?|will win)\s+(the\s+)?(\w+\s+){0,2}(county|counties|vote in|early|primary|endorsement|support|debate|nomination|precinct)/i;
 /* a post must read like a call: decision-desk wording, or "X wins/defeats ... <office or reelection>" */
 /* explicit decision-desk language: enough on its own from any of our outlets */
@@ -1116,8 +1118,9 @@ function partyBefore(t,end){ const seg=t.slice(0,end).toLowerCase(); let best=nu
   return best&&best.p; }
 function parseCall(post){
   const t=(post.text+" "+(post.link&&post.link.title||"")).replace(/\s+/g," ");
-  if(SKIP_RE.test(t)||NOT_CALL_RE.test(t)||NOT_RACE_AFTER_WIN.test(t)||!CALL_FORM_RE.test(t)) return null;
+  if(HARD_NOT_RE.test(t)||NOT_RACE_AFTER_WIN.test(t)) return null;
   const w=WIN_RE.exec(t); if(!w) return null;
+  const strong=STRONG_RE.test(t);
   let st=findState(t);
   if(!st){ /* no state named: identify the race by a candidate's surname, if it matches exactly one Senate/governor race */
     const found=new Set();
@@ -1131,7 +1134,8 @@ function parseCall(post){
   for(const ch of ["sen","gov"]){ const it=RACES[ch].items[st]; if(!it) continue;
     for(const c of candsOf(it.note)){ const re=new RegExp("\\b"+c.last.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i"); const m=re.exec(t);
       if(m&&m.index<w.index&&(!hit||m.index>hit.i)) hit={i:m.index,ch,party:c.party,name:c.last}; } }
-  if(hit) return {key:hit.ch+"-"+st,winner:hit.party,name:hit.name};
+  if(hit){ if(!strong&&SOFT_NOT_RE.test(t)) return null; return {key:hit.ch+"-"+st,winner:hit.party,name:hit.name}; }
+  if(!strong&&(SOFT_NOT_RE.test(t)||!CALL_FORM_RE.test(t))) return null;
   /* 2) otherwise office words + a party word before the win word */
   const party=partyBefore(t,w.index); if(!party) return null;
   const near=(re)=>{ let best=Infinity, m; const g=new RegExp(re.source,"gi"); while((m=g.exec(t))){ const d=Math.abs(m.index-w.index)+(m.index<w.index?5:0); if(d<best) best=d; } return best; };
