@@ -1157,7 +1157,7 @@ function callerName(p){ return p.handle==="apnews.com"?"AP":p.name.replace(/^The
 const viaOf=arr=> arr.some(x=>x.p.handle!=="rss")&&arr.some(x=>x.p.handle==="rss")?"Bluesky & headlines": arr.some(x=>x.p.handle!=="rss")?"Bluesky":"headlines";
 function buildAutoCalls(posts){
   const by={};
-  for(const p of posts){ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
+  for(const p of posts){ if(p.handle!=="rss") continue; /* headlines only */ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
   const out={}; autoConflicts=[]; pendingConfirm=[];
   for(const k in by){ const arr=by[k]; const winners=[...new Set(arr.map(x=>x.c.winner))];
     if(winners.length>1){
@@ -1191,7 +1191,7 @@ async function pullCalls(){
   try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error("server "+r.status);
     const j=await r.json(); const posts=j.posts||[]; autoCalls=buildAutoCalls(posts); rebuildLive();
     const n=Object.keys(autoCalls).length, bad=j.failed||[];
-    $("cfStatus").textContent=`Scanned ${posts.length} possible call posts · ${n} race${n===1?"":"s"} called · checked ${stamp()}`+(autoConflicts.length?` · holding ${autoConflicts.join(", ")} (sources disagree)`:"")+(pendingConfirm.length?` · waiting for a 2nd source on ${pendingConfirm.join(", ")}`:"")+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
+    $("cfStatus").textContent=`Scanned ${posts.length} news headlines · ${n} race${n===1?"":"s"} called · checked ${stamp()}`+(autoConflicts.length?` · holding ${autoConflicts.join(", ")} (sources disagree)`:"")+(pendingConfirm.length?` · waiting for a 2nd source on ${pendingConfirm.join(", ")}`:"")+(bad.length?` · couldn't reach ${bad.join(", ")}`:"");
     paint(); }
   catch(e){ $("cfStatus").textContent=`Couldn't reach the call sources (${e.message||"network error"}) · retrying every 30 seconds`; }
 }
