@@ -202,6 +202,14 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-
 .pbn{flex:1;min-width:0}
 .pbn b{font-size:15px}
 .pbn small{display:block;color:var(--muted);font-size:12px}
+.callfeed{gap:8px;padding:12px 14px}
+.callfeed h2 span{font-family:var(--f-num);font-size:12px;letter-spacing:0;margin-left:6px}
+.cflist{display:flex;flex-direction:column;gap:6px;max-height:228px;overflow-y:auto}
+.cf{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;align-items:center;text-align:left;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);padding:8px 10px;min-height:52px}
+.cf .tag{font-family:var(--f-display);font-weight:800;font-size:15px;letter-spacing:.04em;padding:6px 8px;border-radius:6px;color:#fff;white-space:nowrap}
+.cf .wh{min-width:0;font-weight:600;font-size:15px}
+.cf .wh small{display:block;font-weight:400;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cf time{font-family:var(--f-num);font-size:12px;color:var(--muted);white-space:nowrap}
 .rules{border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
 .rules summary{cursor:pointer;padding:12px 14px;font-weight:600;min-height:24px;list-style:none;display:flex;align-items:center;gap:8px}
 .rules summary::-webkit-details-marker{display:none}
@@ -309,6 +317,10 @@ textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10
     <div class="board-note" id="boardNote"></div>
   </section>
 
+  <section class="card callfeed" aria-label="Race calls">
+    <h2>Race calls <span id="cfCount"></span></h2>
+    <div class="cflist" id="cfList"></div>
+  </section>
   <div class="main">
     <section class="mapcard">
       <div class="mapbox" id="mapbox">
@@ -689,10 +701,10 @@ function openSheet(id){
   if(L){
     lb.hidden=false; lb.textContent="";
     const tag=document.createElement("div"); tag.className="tag";
-    tag.textContent= L.winner?`Live feed · called for ${L.winner==="D"?"Democrat":L.winner==="R"?"Republican":"Independent"}${L.caller?" by "+L.caller:""}`:"Live feed · not called";
+    { const wn=L.winner&&(L.cands||[]).find(c=>c.party===L.winner); tag.textContent= L.winner?`✓ ${wn&&wn.name?wn.name+" ("+L.winner+")":L.winner==="D"?"Democrat":L.winner==="R"?"Republican":"Independent"} wins${L.caller?" · called by "+L.caller:""}`:"Not called yet"; }
     lb.appendChild(tag);
     const bars=document.createElement("div"); bars.className="bars";
-    (L.cands||[]).forEach(c=>{
+    (L.cands||[]).filter(c=>c.pct!=null).forEach(c=>{
       const row=document.createElement("div"); row.className="bar";
       const col=c.party==="D"?"var(--dem)":c.party==="R"?"var(--rep)":"var(--ind)";
       row.innerHTML=`<div><span class="cn"></span><div class="tr"><i style="width:${Math.min(100,+c.pct||0)}%;background:${col}"></i></div></div><span class="v">${(+c.pct||0).toFixed(1)}%</span>`;
@@ -1075,8 +1087,29 @@ function renderDistricts(){
   $("dSub").textContent=`${n} district${n>1?"s":""} · ${rated.length} competitive · ${open} still open`;
 }
 $("dBack").onclick=()=>{ $("dview").hidden=true; stFilter=null; dState=null; paint(); };
+const CH_NAME={sen:"Senate",house:"House",gov:"Governor"}, PARTY_NAME={D:"Democrat",R:"Republican",I:"Independent"};
+function renderCalls(){
+  const list=$("cfList"); if(!list) return; list.textContent="";
+  const calls=Object.entries(live).filter(([,v])=>v&&v.winner).sort((a,b)=>(Date.parse(b[1].calledAt)||0)-(Date.parse(a[1].calledAt)||0));
+  $("cfCount").textContent=calls.length?String(calls.length):"";
+  if(!calls.length){ const e=document.createElement("div"); e.className="empty"; e.style.padding="4px 2px"; e.textContent="No races called yet. Calls from the decision desks show up here as soon as they're published."; list.appendChild(e); return; }
+  for(const [k,v] of calls){
+    const i=k.indexOf("-"), ch=k.slice(0,i), id=k.slice(i+1), it=RACES[ch]&&RACES[ch].items[id], st=id.split("-")[0];
+    const wn=(v.cands||[]).find(c=>c.party===v.winner);
+    const b=document.createElement("button"); b.className="cf";
+    b.innerHTML=`<span class="tag"></span><span class="wh"><span class="t1"></span><small></small></span><time></time>`;
+    const tg=b.querySelector(".tag"); tg.textContent=ch==="house"?id.replace("-AL",""):st+" "+(ch==="sen"?"SEN":"GOV"); tg.style.background=FILL[v.winner];
+    if(v.winner==="I") tg.style.color="#231500";
+    const flip= it&&it.holder!=="N"&&it.holder!==v.winner;
+    b.querySelector(".t1").textContent=`${wn&&wn.name?wn.name:PARTY_NAME[v.winner]} (${v.winner}) wins ${ch==="house"?"":NAMES[st]+" "}${CH_NAME[ch]}`+(flip?" · FLIP":"");
+    b.querySelector("small").textContent= v.caller?`Called by ${v.caller}`:"Called";
+    const t=Date.parse(v.calledAt); b.querySelector("time").textContent= t?new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"";
+    b.onclick=()=>{ if(mode!=="board") setMode("board"); if(race!==ch) setRace(ch); if(it) openSheet(id); };
+    list.appendChild(b);
+  }
+}
 const _paint=paint;
-paint=function(){ _paint(); renderDistricts(); };
+paint=function(){ _paint(); renderDistricts(); renderCalls(); };
 
 /* ---------- news: Bluesky reporters + headlines ---------- */
 let newsSrc="social", newsElec=true, feeds={social:{items:[],at:0,note:""},heads:{items:[],at:0,note:""}}, socialHandles=[];
