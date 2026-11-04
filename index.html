@@ -1092,7 +1092,7 @@ function rebuildLive(){
     live[k]={winner:o.force,caller:`marked by ${o.by||"a viewer"}`,calledAt:o.at,manual:true,cands:[]}; }
 }
 const STATE_LIST=Object.entries(NAMES).filter(([c])=>c!=="DC").sort((a,b)=>b[1].length-a[1].length);
-const WIN_RE=/\b(wins?|won|will win|projected to win|projected winner|defeats|reelected|re-elected|keeps|retains|is elected|elected to|holds? (on to )?(her |his |the |a )?([\w-]+ ){0,2}seat)\b/i;
+const WIN_RE=/\b(flips?|captures?|picks up|takes|wins?|won|will win|projected to win|projected winner|defeats|reelected|re-elected|keeps|retains|is elected|elected to|holds? (on to )?(her |his |the |a )?([\w-]+ ){0,2}seat)\b/i;
 /* never a call */
 const HARD_NOT_RE=/\?|\bprimar(y|ies)\b|\brunoff\b|\btoo (close|early)\b|\bnot yet\b|\bdeclares? victory\b|\bclaims? victory\b|\bsays (he|she) (won|will win)\b|\bwho will\b|\bpredict/i;
 /* signs of a non-call; ignored when the post also has clear call language */
@@ -1100,7 +1100,7 @@ const SOFT_NOT_RE=/\b(leads?|leading|ahead|edges?|early (vote|votes|returns|resu
 const NOT_RACE_AFTER_WIN=/\b(wins?|will win)\s+(the\s+)?(\w+\s+){0,2}(county|counties|vote in|early|primary|endorsement|support|debate|nomination|precinct)/i;
 /* a post must read like a call: decision-desk wording, or "X wins/defeats ... <office or reelection>" */
 /* explicit decision-desk language: enough on its own from any of our outlets */
-const STRONG_RE=/\b(projects?|projected|race call|aprace ?call|calls? the race|declared the winner|wins? (re-?election|election)|wins? the [\w.' -]{0,30}(senate|governor'?s?|gubernatorial|house) (race|seat|contest))\b/i;
+const STRONG_RE=/\b(projects?|projected|race call|aprace ?call|calls? the race|declared the winner|wins? (re-?election|election)|(wins?|flips?|captures?|keeps|retains) (the )?[\w.' -]{0,30}(senate|governor'?s?|gubernatorial|house) (race|seat|contest|election))\b/i;
 const CALL_FORM_RE=/\b(projects?|projected|race call|aprace ?call|calls? the race|declared the winner)\b|\bwins? (re-?election|election)\b|\b(wins?|defeats?)\b[^.]{0,80}\b(senate|governor|gubernatorial|house|congressional|district|seat|race)\b/i;
 const SKIP_RE=/\?|\bprimar(y|ies)\b|\bcould\b|\bwould\b|\bmight\b|\bpolls?\b|\bpolling\b|\bodds\b|\bchances?\b|\bhow\b|\bwhy\b|\bwho will\b|\brunoff\b|\bif\b|\bpredict/i;
 function findState(t){
@@ -1124,7 +1124,7 @@ function parseCall(post){
   let st=findState(t);
   if(!st){ /* no state named: identify the race by a candidate's surname, if it matches exactly one Senate/governor race */
     const found=new Set();
-    for(const ch of ["sen","gov"]) for(const id in RACES[ch].items) for(const c of candsOf(RACES[ch].items[id].note)){
+    for(const ch of ["sen","gov"]) for(const id in RACES[ch].items) for(const c of candsFor(ch,id)){
       const m=new RegExp("\\b"+c.last.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b").exec(t);
       if(m&&m.index<w.index) found.add(id); }
     if(found.size!==1) return null; st=[...found][0];
@@ -1132,7 +1132,7 @@ function parseCall(post){
   /* 1) match a named candidate in this state's Senate or governor race, closest before the win word */
   let hit=null;
   for(const ch of ["sen","gov"]){ const it=RACES[ch].items[st]; if(!it) continue;
-    for(const c of candsOf(it.note)){ const re=new RegExp("\\b"+c.last.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i"); const m=re.exec(t);
+    for(const c of candsFor(ch,st)){ const re=new RegExp("\\b"+c.last.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i"); const m=re.exec(t);
       if(m&&m.index<w.index&&(!hit||m.index>hit.i)) hit={i:m.index,ch,party:c.party,name:c.last}; } }
   if(hit){ if(!strong&&SOFT_NOT_RE.test(t)) return null; return {key:hit.ch+"-"+st,winner:hit.party,name:hit.name}; }
   if(!strong&&(SOFT_NOT_RE.test(t)||!CALL_FORM_RE.test(t))) return null;
@@ -1153,11 +1153,13 @@ function parseCall(post){
   }
   return null;
 }
-function callerName(p){ return p.handle==="apnews.com"?"AP":p.name.replace(/^The /,""); }
-const viaOf=arr=> arr.some(x=>x.p.handle!=="rss")&&arr.some(x=>x.p.handle==="rss")?"Bluesky & headlines": arr.some(x=>x.p.handle!=="rss")?"Bluesky":"headlines";
+function callerName(p){ return p.handle==="apnews.com"?"AP":p.handle==="wiki"?"Wikipedia":p.name.replace(/^The /,""); }
+const viaOf=arr=>{ const w=new Set(arr.map(x=>x.p.handle==="rss"?"headlines":x.p.handle==="wiki"?"Wikipedia":"Bluesky")); return [...w].join(" & "); };
 function buildAutoCalls(posts){
   const by={};
   for(const p of posts){ if(p.handle!=="rss") continue; /* headlines only */ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
+  for(const k in wikiRaces){ const w=wikiRaces[k]; if(!w.winner) continue;
+    (by[k]=by[k]||[]).push({c:{key:k,winner:w.winner.party,name:w.winner.name.split(" ").pop()},p:{handle:"wiki",name:"Wikipedia",text:`Results box lists ${w.winner.name} (${w.winner.party}) as elected`,ts:w.ts||Date.now(),url:w.url}}); }
   const out={}; autoConflicts=[]; pendingConfirm=[];
   for(const k in by){ const arr=by[k]; const winners=[...new Set(arr.map(x=>x.c.winner))];
     if(winners.length>1){
@@ -1171,12 +1173,12 @@ function buildAutoCalls(posts){
     { const i=k.indexOf("-"), it=RACES[k.slice(0,i)]&&RACES[k.slice(0,i)].items[k.slice(i+1)];
       const close= it&&(["T","LD","LR"].includes(it.rating) || (it.holder!=="N"&&it.holder!==winners[0]));
       const outlets=new Set(arr.map(x=>callerName(x.p)));
-      const strong=arr.some(x=>STRONG_RE.test(x.p.text));
+      const strong=arr.some(x=>x.p.handle==="wiki"||STRONG_RE.test(x.p.text));
       if(close&&!strong&&!outlets.has("AP")&&outlets.size<2){ pendingConfirm.push(k); continue; } }
-    const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP"));
+    const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP")); if(callers.length>1) callers.sort((a,b)=>(a==="Wikipedia")-(b==="Wikipedia"));
     const nm=arr.find(x=>x.c.name); 
-    out[k]={winner:winners[0],caller:callers.slice(0,3).join(", ")+` (via ${viaOf(arr)})`,calledAt:new Date(arr[0].p.ts).toISOString(),url:arr[0].p.url,auto:true,
-      sources:arr.map(x=>({by:callerName(x.p),where:x.p.handle==="rss"?"headline":"Bluesky",text:x.p.text.slice(0,300),url:x.p.url,ts:x.p.ts})),
+    out[k]={winner:winners[0],caller: arr.every(x=>x.p.handle==="wiki")?"Wikipedia's results box":callers.slice(0,3).join(", ")+` (via ${viaOf(arr)})`,calledAt:new Date(arr[0].p.ts).toISOString(),url:arr[0].p.url,auto:true,
+      sources:arr.map(x=>({by:callerName(x.p),where:x.p.handle==="rss"?"headline":x.p.handle==="wiki"?"results box":"Bluesky",text:x.p.text.slice(0,300),url:x.p.url,ts:x.p.ts})),
       cands: nm?[{name:nm.c.name,party:winners[0],pct:null}]:[]};
   }
   return out;
@@ -1186,6 +1188,23 @@ async function setOverride(k,action,block){
     if(!r.ok) throw new Error(r.status); const j=await r.json(); overrides=j.overrides||{}; rebuildLive(); paint();
     $("cfStatus").textContent= action==="uncall"?"Call removed for everyone. If outlets call it the other way, that call will still come through.": action==="call"?"Marked as called for everyone.":"Done."; if(!sheet.hidden&&sel) openSheet(sel); }
   catch(e){ $("cfStatus").textContent="Couldn't change that call. Check your connection and try again."; }
+}
+/* Wikipedia: nominee names for every race (so headlines naming a candidate can be matched), plus recorded winners */
+let wikiRaces={};
+function candsFor(ch,st){
+  const it=RACES[ch].items[st]; const out=candsOf(it&&it.note);
+  const w=wikiRaces[ch+"-"+st];
+  if(w) for(const c of w.cands||[]){ const last=c.name.split(" ").filter(x=>!/^(jr\.?|sr\.?|ii|iii|iv)$/i.test(x)).pop(); if(last&&!out.some(o=>o.last.toLowerCase()===last.toLowerCase())) out.push({last,party:c.party}); }
+  return out;
+}
+async function pullWiki(){
+  try{ const r=await fetch("/api/wiki",{cache:"no-store"}); if(!r.ok) throw new Error(r.status);
+    const j=await r.json(); wikiRaces=j.races||{};
+    for(const k in wikiRaces){ const i=k.indexOf("-"), ch=k.slice(0,i), st=k.slice(i+1), it=RACES[ch]&&RACES[ch].items[st]; const cs=wikiRaces[k].cands||[];
+      if(it&&cs.length>=2&&!/\([DRI]\)/.test(it.note||"")){ const extra=it.note&&!/^open seat$/i.test(it.note)?` · ${it.note}`:"";
+        it.note=cs.map(c=>`${c.name.split(" ").pop()} (${c.party})`).join(" vs. ")+extra; } }
+    pullCalls();
+  }catch(e){}
 }
 async function pullCalls(){
   try{ const r=await fetch("/api/callposts",{cache:"no-store"}); if(!r.ok) throw new Error("server "+r.status);
@@ -1427,7 +1446,7 @@ function askName(){ if(myDraft&&myDraft.name) return; $("nameModal").hidden=fals
 $("nameForm").addEventListener("submit",e=>{ e.preventDefault(); const v=$("nameIn").value.trim().slice(0,24); if(!v) return;
   myDraft.name=v; $("nameModal").hidden=true; $("pkStatus").textContent=""; commitMe(); });
 
-initIdentity(); applyAdmin(); buildMap(); paint(); pull(); setInterval(pull,20000); pullCalls(); setInterval(pullCalls,30000); askName();
+initIdentity(); applyAdmin(); buildMap(); paint(); pull(); setInterval(pull,20000); pullCalls(); setInterval(pullCalls,30000); pullWiki(); setInterval(pullWiki,60000); askName();
 })();
 </script>
 </body>
