@@ -1048,6 +1048,7 @@ function parseCall(post){
   return null;
 }
 function callerName(p){ return p.handle==="apnews.com"?"AP":p.name.replace(/^The /,""); }
+const viaOf=arr=> arr.some(x=>x.p.handle!=="rss")&&arr.some(x=>x.p.handle==="rss")?"Bluesky & headlines": arr.some(x=>x.p.handle!=="rss")?"Bluesky":"headlines";
 function buildAutoCalls(posts){
   const by={};
   for(const p of posts){ const c=parseCall(p); if(!c) continue; (by[c.key]=by[c.key]||[]).push({c,p}); }
@@ -1057,7 +1058,7 @@ function buildAutoCalls(posts){
     arr.sort((a,b)=>a.p.ts-b.p.ts);
     const callers=[...new Set(arr.map(x=>callerName(x.p)))]; if(callers.includes("AP")) callers.sort((a,b)=>(b==="AP")-(a==="AP"));
     const nm=arr.find(x=>x.c.name); 
-    out[k]={winner:winners[0],caller:callers.slice(0,3).join(", ")+" (via Bluesky)",calledAt:new Date(arr[0].p.ts).toISOString(),url:arr[0].p.url,auto:true,
+    out[k]={winner:winners[0],caller:callers.slice(0,3).join(", ")+` (via ${viaOf(arr)})`,calledAt:new Date(arr[0].p.ts).toISOString(),url:arr[0].p.url,auto:true,
       cands: nm?[{name:nm.c.name,party:winners[0],pct:null}]:[]};
   }
   return out;
