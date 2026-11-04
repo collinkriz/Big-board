@@ -806,7 +806,8 @@ function setPick(k,v){ const p=me(); if(!p||p.locked)return; if(!p.picks)p.picks
 function renderPicks(){
   const p=me()||{name:"",picks:{},tb:{}};
   /* leaderboard */
-  const rows=Object.entries(players).map(([id,pl])=>({id,pl,s:scoreOf(pl)}));
+  const canPeek=!!p.locked||isAdmin;
+  const rows=Object.entries(players).map(([id,pl])=>({id,pl,s:scoreOf(pl)})).filter(r=>r.id===meId||r.s.made>0);
   const finals={sen:actual("sen"),house:actual("house")};
   rows.forEach(r=>r.bonus={});
   for(const ch of ["sen","house"]){
@@ -825,7 +826,7 @@ function renderPicks(){
     const tb=r.pl.tb||{};
     const g=ch=>{ const v=tb[ch]; if(!v) return "no guess"; if(r.bonus[ch]) return `${v} (+${r.bonus[ch]})`; return finals[ch]==null?`${v} (pending)`:`${v}`; };
     d.querySelector("small").textContent=(r.pl.locked?"Submitted":"Still picking")+` · ${r.s.hit} of ${r.s.dec} called right`+(r.s.upsets?` · ${r.s.upsets} upset${r.s.upsets>1?"s":""}`:"")+` · ${r.s.made}/35 picked · Senate guess ${g("sen")} · House guess ${g("house")}`;
-    if(p.locked){ d.classList.add("tap"); d.tabIndex=0; d.setAttribute("role","button"); d.setAttribute("aria-label",`See ${r.pl.name||"this player"}'s board`);
+    if(canPeek){ d.classList.add("tap"); d.tabIndex=0; d.setAttribute("role","button"); d.setAttribute("aria-label",`See ${r.pl.name||"this player"}'s board`);
       d.onclick=()=>openPlayer(r.id); d.onkeydown=e=>{ if(e.key==="Enter") openPlayer(r.id); }; }
     lb.appendChild(d);
   });
@@ -843,7 +844,7 @@ function renderPicks(){
   renderProj(p.picks,"pj","Your map");
   miniMap($("myMap"),p.picks,p.locked?null:cyclePick);
   $("myMapHint").textContent= p.locked?"Your submitted map.":"Tap a state to cycle your pick: Dem → GOP → blank (Nebraska adds Independent).";
-  $("peekNote").textContent= p.locked?"Tap anyone on the leaderboard to see their full board.":"Other players' picks stay hidden until you submit yours.";
+  $("peekNote").textContent= canPeek?"Tap anyone on the leaderboard to see their full board."+(isAdmin&&!p.locked?" (You can see every board as admin.)":""):"Other players' picks stay hidden until you submit yours.";
   if(pbOpen) openPlayer(pbOpen);
   $("pkProgress").textContent= p.locked?`Submitted with ${prog.made} of ${prog.total} races picked. Good luck.`
     :`${prog.made} of ${prog.total} races picked · ${prog.tossLeft} toss-up${prog.tossLeft===1?"":"s"} still blank`;
@@ -871,7 +872,7 @@ function renderPicks(){
     const ot=row.querySelector(".others");
     for(const [,pl] of others){ const v=(pl.picks||{})[k]; const c=document.createElement("span");
       const fn=(pl.name||"Friend").split(" ")[0];
-      if(p.locked){ c.className="ob"+(v?" "+v:"")+(r&&v?(v===r?" hit":" miss"):""); c.textContent=`${fn}: ${v||"—"}`; }
+      if(canPeek){ c.className="ob"+(v?" "+v:"")+(r&&v?(v===r?" hit":" miss"):""); c.textContent=`${fn}: ${v||"—"}`; }
       else { c.className="ob"; c.textContent=`${fn}: ${v?"picked 🔒":"—"}`; }
       ot.appendChild(c); }
     list.appendChild(row);
